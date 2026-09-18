@@ -109,3 +109,11 @@ override with `QIVEN_FOUNDATION_ROOT`).
 - Canonical project cognition: `JasonHuang3D/qiven-context`
 - Conventions: `qiven-devkit` templates as applied by `qiven-foundation` / `qiven-math`
 - Design lineage: draft v0 (Jason), v1–v2 (ZCode+Jason pairing), this repository
+
+## Agent notes
+
+AGENTS.md is Devkit-managed. Draft discipline: semantics live in headers with
+short normative comments; `GitStore` stays a documented sketch (the store
+contract is proven by `MemoryStore`); do not introduce serialization libraries,
+networking or a YAML parser — this draft proves the architecture, not the
+transport.
