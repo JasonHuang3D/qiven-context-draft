@@ -11,7 +11,7 @@
 //  - IMMUTABLE MATERIALIZATIONS (review §2): a write mints a SUCCESSOR
 //    Materialization; nothing mutates a published one. Participants pinning a
 //    handle see one consistent world for their whole Work cycle — the alias
-//    data race between ReadFromCognition and the publish path is gone.
+//    data race between read_from_cognition and the publish path is gone.
 //  - TYPED STORE RECEIPTS (review §6): compareAndSwap returns
 //    Committed / CompareFailed / OutcomeUnknown — a CAS failure (definitely
 //    not committed) and a lost acknowledgement (possibly committed) are
@@ -45,14 +45,14 @@ struct Device;
 using Bytes = std::vector<std::byte>; // draft serialization payload (versioned TLV)
 
 // draft content hashing (FNV-1a hex); production mints SHA-256 ContentIds
-[[nodiscard]] ContentId DraftContentId(const Bytes& stateBytes);
+[[nodiscard]] ContentId draft_content_id(const Bytes& stateBytes);
 
 // canonical serialization of one snapshot — the export primitive (K4 shape);
 // deterministic for the same snapshot and serialization version
-[[nodiscard]] Bytes SerializeSnapshot(const Snapshot& snapshot);
+[[nodiscard]] Bytes serialize_snapshot(const Snapshot& snapshot);
 
 // integrity identity of canonical snapshot bytes (review §3)
-[[nodiscard]] SnapshotDigest DraftSnapshotDigest(const Bytes& stateBytes);
+[[nodiscard]] SnapshotDigest draft_snapshot_digest(const Bytes& stateBytes);
 
 // --- store contract: the ENTIRE persistence requirement ----------------------
 
@@ -200,7 +200,7 @@ struct AuthenticatedActor
 }
 
 // UNFORGEABLE LEASE (review §4): private constructor, move-only, no default.
-// A grant is minted only by QivenContext::AcquireGrant and carries a minted
+// A grant is minted only by QivenContext::acquire_grant and carries a minted
 // GrantId the service validates against its active lease — assembling a
 // value-equal forgery is not expressible in the type system.
 class ExecutionGrant
@@ -233,7 +233,7 @@ private:
 // identity port: verification happens here, never by caller assertion. Ports
 // are called WITH the governance snapshot the service supplies and NEVER
 // re-enter QivenContext (pit P-42 — the 2026-09-19 incident: a verifier that
-// called CanonicalHead() re-locked the admission mutex on the same thread and
+// called canonical_head() re-locked the admission mutex on the same thread and
 // threw resource_deadlock_would_occur; uncaught, it terminated silently).
 // Production verifies against the live identity provider and re-checks at
 // commit time (ADR-0033 section 4).
@@ -297,7 +297,7 @@ struct ContextTransaction
 };
 
 // content identity of the ordered operations — what an H2 review binds to
-[[nodiscard]] ContentId DigestOperations(const std::vector<Operation>& operations);
+[[nodiscard]] ContentId digest_operations(const std::vector<Operation>& operations);
 
 struct ReviewRecord // the process-layer artifact an H2Evidence comes FROM;
                     // pit.merge_surrogate_refused: publication paths are
@@ -425,26 +425,26 @@ public:
     static void attachStore(std::shared_ptr<ICognitionStore> store);
 
     // bind the identity port; defaults to the root-principal verifier below
-    static void attachIdentityVerifier(std::shared_ptr<IIdentityVerifier> verifier);
+    static void attach_identity_verifier(std::shared_ptr<IIdentityVerifier> verifier);
 
     // materialize a fresh cognition. read-only w.r.t. project truth (R6).
     // CanonicalRemote -> cold boot (Promoted: the remote IS canonical);
     // HandoffArtifact -> quarantined Isolated (K4: restore is not authority).
     // Returns nullptr on a corrupt source with *err filled (DR-009).
-    static CognitionHandle CreateCognition(const CognitionSource& source,
-                                           DeserializeError* err = nullptr);
+    static CognitionHandle create_cognition(const CognitionSource& source,
+                                            DeserializeError* err = nullptr);
 
     // full snapshot for thinking (immutable — race-free by construction)
-    static Data ReadFromCognition(const CognitionHandle& handle, const Query& query);
+    static Data read_from_cognition(const CognitionHandle& handle, const Query& query);
 
     // single-writer lease: exactly one active grant chain-wide. A second
     // acquire while one is held is refused fail-closed (pit P-01) — competing
     // flows are quarantined, never queued. Identity is verified at acquire
     // AND re-checked at write (ADR-0033 section 4). The minted GrantId is the
     // only capability the gate accepts (review §4).
-    [[nodiscard]] static std::optional<ExecutionGrant> AcquireGrant(const AuthenticatedActor& actor,
-                                                                    WorkMode mode);
-    static void ReleaseGrant(const ExecutionGrant& grant);
+    [[nodiscard]] static std::optional<ExecutionGrant> acquire_grant(const AuthenticatedActor& actor,
+                                                                     WorkMode mode);
+    static void release_grant(const ExecutionGrant& grant);
 
     // the gated write. Gate order is normative and tested:
     //   0. handle known + non-quarantined          -> GovernanceDenied
@@ -464,13 +464,13 @@ public:
     // An empty operations list is an ordinary turn: Applied, nothing stored.
     // On Applied the SUCCESSOR MATERIALIZATION is returned and the registry
     // advances to it — the caller's old handle keeps its pinned world.
-    static Verdict WriteToCognition(const CognitionHandle& handle,
-                                    const ContextTransaction& transaction,
-                                    const ExecutionGrant& grant);
+    static Verdict write_to_cognition(const CognitionHandle& handle,
+                                      const ContextTransaction& transaction,
+                                      const ExecutionGrant& grant);
 
     // the recovery rule for a refusal, read from cognition (DR-002); missing
     // rows fall back to FailClosed
-    [[nodiscard]] static RecoveryAction RecoveryFor(const Snapshot& snapshot, RefusalReason reason);
+    [[nodiscard]] static RecoveryAction recovery_for(const Snapshot& snapshot, RefusalReason reason);
 
     // view resolution: a pure read-time transformation. Unknown ids fall back
     // to the identity-independent context (nullopt + NotFound) — a participant
@@ -490,7 +490,7 @@ public:
     // drop the service's owning reference; pinned handles stay alive but fenced
     // (lifetime = shared_ptr; authority = the active grant — the v1 conflation,
     // split in v2, made a type shape in v3)
-    static bool RetireCognition(const CognitionHandle& handle);
+    static bool retire_cognition(const CognitionHandle& handle);
 
     // quarantine state machine (fail-closed): Isolated -> Verified requires
     // the root principal (integrity was already checked at restore);
@@ -498,23 +498,23 @@ public:
     // checksum success, import or uptime NEVER promote (review §10, S10-R2).
     // Nothing in this draft sets AuthorityPending: that requires a canonical
     // cutover ADR, which is out of draft scope by design.
-    [[nodiscard]] static CognitionHandle VerifyRestored(const CognitionHandle& handle,
-                                                        const AuthenticatedActor& actor);
-    [[nodiscard]] static CognitionHandle PromoteAuthority(const CognitionHandle& handle,
-                                                          const AuthenticatedActor& actor);
+    [[nodiscard]] static CognitionHandle verify_restored(const CognitionHandle& handle,
+                                                         const AuthenticatedActor& actor);
+    [[nodiscard]] static CognitionHandle promote_authority(const CognitionHandle& handle,
+                                                           const AuthenticatedActor& actor);
 
     // the canonical head snapshot, for ports that verify against live
     // governance; empty principal on an unreadable store
-    [[nodiscard]] static std::shared_ptr<const Snapshot> CanonicalHead();
+    [[nodiscard]] static std::shared_ptr<const Snapshot> canonical_head();
 
     // the ONLY whole-graph predicate; validated for EDGE consistency too —
     // the client must actually reference the llm and device passed in, the
     // llm must be bound to this handle, and the binding disclosure must match
     // the LLM identity (review §9/§10)
-    static bool IsContinueable(const Human* h, const LLMClientTool* c, const Device* d,
-                               const LLM* l, const CognitionHandle& handle);
+    static bool is_continueable(const Human* h, const LLMClientTool* c, const Device* d,
+                                const LLM* l, const CognitionHandle& handle);
 
-    [[nodiscard]] static Epoch currentEpoch(); // lock-free sampling for pre-checks
+    [[nodiscard]] static Epoch current_epoch(); // lock-free sampling for pre-checks
 
 private:
     struct Registry
@@ -523,9 +523,9 @@ private:
     };
     // canonical head snapshot; caller MUST hold g_admission (ports receive it
     // as context — P-42: ports never re-enter the service while it is locked)
-    [[nodiscard]] static std::shared_ptr<const Snapshot> CanonicalHeadLocked();
+    [[nodiscard]] static std::shared_ptr<const Snapshot> canonical_head_locked();
     static std::mutex g_admission;     // serializes grant state + writes
-    static std::atomic<Epoch> g_epoch; // monotonic; fetch_add on each CreateCognition
+    static std::atomic<Epoch> g_epoch; // monotonic; fetch_add on each create_cognition
     static std::shared_ptr<ICognitionStore> g_store;
     static std::shared_ptr<IIdentityVerifier> g_identity;
     static std::vector<Registry> g_live; // live materializations, epoch-indexed

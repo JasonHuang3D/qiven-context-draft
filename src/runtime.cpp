@@ -5,6 +5,9 @@
 // looked up in the policy table carried by cognition, and the mandated next
 // action is recorded in the checkpoint. Only StaleBase parks a delta for a
 // re-think; handoff refusals halt and escalate — retrying is forbidden.
+//
+// DR-012: annotate_budget is called on EVERY completed turn — success,
+// refusal, and no-op alike. The model never chooses its own recovery.
 // ============================================================================
 
 #include <qiven/context/runtime.hpp>
@@ -40,8 +43,16 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
                WorkMode mode)
 {
     const auto turnStart = std::chrono::steady_clock::now(); // session economics (DR-012)
-    const auto handle    = pCognition;                       // pin lifetime for this whole cycle;
-                                                             // authority is fenced by the grant (DR-010)
+    work_impl(prompt, actor, result, mode, turnStart);
+    annotate_budget(turnStart); // EVERY completed turn: success, refusal, no-op
+}
+
+void LLM::work_impl(const std::string& prompt, const AuthenticatedActor& actor,
+                    std::string& result, WorkMode mode,
+                    std::chrono::steady_clock::time_point turnStart)
+{
+    const auto handle = pCognition; // pin lifetime for this whole cycle;
+                                    // authority is fenced by the grant (DR-010)
     if (!handle)
     {
         result = name + ": no cognition bound";
@@ -49,7 +60,7 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
     }
 
     // 1. single-writer lease: a competing flow is refused fail-closed (P-01)
-    const auto grant = QivenContext::AcquireGrant(actor, mode);
+    const auto grant = QivenContext::acquire_grant(actor, mode);
     if (!grant.has_value())
     {
         checkpoint.lastTrigger = CheckpointTrigger::TurnBoundary;
@@ -62,7 +73,7 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
     // 2. full snapshot for thinking — the typed Bundle with floors lands in
     //    Phase 2 (DR-007); token cost is a Bundle concern, never K5's
     const Query query = queryBuilder ? queryBuilder(prompt) : Query { prompt, 0 };
-    const Data data   = QivenContext::ReadFromCognition(handle, query);
+    const Data data   = QivenContext::read_from_cognition(handle, query);
     static_cast<void>(data); // 3-4. VerifyLiveFacts + Thinking + CallTools: opaque here
 
     // 5. build the write shape; no generator or empty transaction = ordinary turn
@@ -73,7 +84,7 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
     }
     if (transaction.operations.empty())
     {
-        QivenContext::ReleaseGrant(*grant);
+        QivenContext::release_grant(*grant);
         checkpoint.nextAction = "continue";
         result                = name + ": no material cognition this turn";
         return;
@@ -81,8 +92,8 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
     transaction.base = handle->revision; // durable fencing token: my thinking assumed this
 
     // 6. gated write — every gate inside the service; verdict carries the reason
-    const Verdict verdict = QivenContext::WriteToCognition(handle, transaction, *grant);
-    QivenContext::ReleaseGrant(*grant);
+    const Verdict verdict = QivenContext::write_to_cognition(handle, transaction, *grant);
+    QivenContext::release_grant(*grant);
 
     if (verdict.outcome == Verdict::Outcome::Applied)
     {
@@ -98,7 +109,7 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
 
     // 7. refused: the recovery table in cognition mandates the next action
     const RecoveryAction action =
-        QivenContext::RecoveryFor(*handle->state, verdict.reason); // pre-write table: policy rows are stable
+        QivenContext::recovery_for(*handle->state, verdict.reason); // pre-write table: policy rows are stable
     checkpoint.unacceptedCandidates.push_back(transaction.base);
     if (verdict.outcome == Verdict::Outcome::OutcomeUnknown)
     {
@@ -133,10 +144,9 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
         break;
     }
     result = name + ": refused (" + std::string(refusalName(verdict.reason)) + "); next: " + checkpoint.nextAction;
-    annotateBudget(turnStart);
 }
 
-void LLM::annotateBudget(std::chrono::steady_clock::time_point turnStart) // pit.liveness_reports_observables
+void LLM::annotate_budget(std::chrono::steady_clock::time_point turnStart) // pit.liveness_reports_observables
 {
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - turnStart);

@@ -6,7 +6,7 @@
 
 #include <qiven/context/persistence.hpp>
 
-#include <qiven/context/runtime.hpp> // IsContinueable inspects participant fields
+#include <qiven/context/runtime.hpp> // is_continueable inspects participant fields
 
 #include <qiven/byte_cursor.hpp>
 #include <qiven/contracts.hpp>
@@ -24,8 +24,8 @@ namespace qiven::context
 {
 namespace
 {
-constexpr std::uint8_t kSerializationVersion = 5;
-constexpr std::uint32_t kMaxRecords          = 100000; // resource-abuse guard (DR-009)
+constexpr std::uint8_t serialization_version_limit = 5;
+constexpr std::uint32_t max_serialized_records     = 100000; // resource-abuse guard (DR-009)
 
 // --- little-endian TLV writers (fixed field order, versioned) ----------------
 
@@ -168,7 +168,7 @@ struct Reader
     [[nodiscard]] std::uint32_t cappedCount(const char* what)
     {
         const auto count = u32(what);
-        if (ok() && count > kMaxRecords)
+        if (ok() && count > max_serialized_records)
         {
             error = DeserializeError { DeserializeError::Kind::ResourceAbuse, 0, what };
             return 0;
@@ -191,7 +191,7 @@ struct Reader
 Bytes serializeImpl(const Snapshot& snapshot)
 {
     Bytes bytes;
-    putU8(bytes, kSerializationVersion);
+    putU8(bytes, serialization_version_limit);
 
     putStr(bytes, snapshot.governance.rootPrincipal);
 
@@ -320,7 +320,7 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
     Reader reader { bytes };
 
     const auto version = reader.u8("serialization version");
-    if (reader.ok() && version != kSerializationVersion)
+    if (reader.ok() && version != serialization_version_limit)
     {
         reader.error = DeserializeError { DeserializeError::Kind::BadVersion, 0, "version" };
     }
@@ -666,17 +666,17 @@ const ProfileRecord* findProfile(const Snapshot& snapshot, const std::string& id
 // (qiven::fnv1a64 / qiven::to_hex_u64 - foundation hashing.hpp and the
 // distillation doc); FNV-1a is not cryptographic, the production engine
 // mints SHA-256 digests at the kernel layer
-ContentId DraftContentId(const Bytes& stateBytes)
+ContentId draft_content_id(const Bytes& stateBytes)
 {
     return "draft-" + qiven::to_hex_u64(qiven::fnv1a64(stateBytes));
 }
 
-SnapshotDigest DraftSnapshotDigest(const Bytes& stateBytes)
+SnapshotDigest draft_snapshot_digest(const Bytes& stateBytes)
 {
     return SnapshotDigest { "snap-" + qiven::to_hex_u64(qiven::fnv1a64(stateBytes)) };
 }
 
-ContentId DigestOperations(const std::vector<Operation>& operations)
+ContentId digest_operations(const std::vector<Operation>& operations)
 { // the exact delta an H2 review binds to (DR-004): ordered fields, no framing
     Bytes bytes;
     for (const auto& operation : operations)
@@ -690,21 +690,21 @@ ContentId DigestOperations(const std::vector<Operation>& operations)
         putStr(bytes, operation.payload);
         putStr(bytes, operation.provenanceRef);
     }
-    return DraftContentId(bytes);
+    return draft_content_id(bytes);
 }
 
-Bytes SerializeSnapshot(const Snapshot& snapshot)
+Bytes serialize_snapshot(const Snapshot& snapshot)
 {
     return serializeImpl(snapshot);
 }
 
 namespace
 {
-[[nodiscard]] std::string RequestDigestOf(const ContextTransaction& transaction)
+[[nodiscard]] std::string request_digest_of(const ContextTransaction& transaction)
 { // digest of the complete request: base, ordered operations, evidence (ADR-0033 §4)
     Bytes bytes;
     putStr(bytes, transaction.base.value);
-    putStr(bytes, DigestOperations(transaction.operations));
+    putStr(bytes, digest_operations(transaction.operations));
     putStr(bytes, transaction.handoffEvidenceRef);
     putU8(bytes, transaction.h2.has_value() ? 1 : 0);
     if (transaction.h2.has_value())
@@ -714,7 +714,7 @@ namespace
         putStr(bytes, transaction.h2->reviewerBinding);
         putStr(bytes, transaction.h2->reviewRef);
     }
-    return DraftContentId(bytes);
+    return draft_content_id(bytes);
 }
 } // namespace
 
@@ -836,13 +836,13 @@ void QivenContext::attachStore(std::shared_ptr<ICognitionStore> store)
     g_store = std::move(store);
 }
 
-void QivenContext::attachIdentityVerifier(std::shared_ptr<IIdentityVerifier> verifier)
+void QivenContext::attach_identity_verifier(std::shared_ptr<IIdentityVerifier> verifier)
 {
     std::lock_guard lock(g_admission);
     g_identity = verifier ? std::move(verifier) : std::make_shared<RootPrincipalVerifier>();
 }
 
-CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, DeserializeError* err)
+CognitionHandle QivenContext::create_cognition(const CognitionSource& source, DeserializeError* err)
 {
     std::lock_guard lock(g_admission);
     // NOTE: the HandoffArtifact path is deliberately store-FREE — a K4 consumer
@@ -867,6 +867,11 @@ CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, Des
         QIVEN_ASSERT(g_store != nullptr); // only the cold-boot path needs a store
         const RevisionId id = IsEmpty(source.revision) ? g_store->head() : source.revision;
         bytes               = g_store->materialize(id);
+        if (bytes.empty() && !IsEmpty(id))
+        {
+            return fail(DeserializeError { DeserializeError::Kind::Truncated, 0,
+                                           "revision not found: " + id.value });
+        }
         if (bytes.empty())
         {
             // genesis: no canonical state yet — materialize the empty cognition
@@ -885,7 +890,7 @@ CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, Des
     case CognitionSourceKind::HandoffArtifact:
         bytes      = source.inlineBytes;        // K4: restored from artifact bytes alone
         quarantine = QuarantineState::Isolated; // restore is not authority
-        if (!source.expectedDigest.empty() && DraftContentId(bytes) != source.expectedDigest)
+        if (!source.expectedDigest.empty() && draft_content_id(bytes) != source.expectedDigest)
         {
             // content-identified delivery: a mismatch is corruption, not a
             // warning (context-handoff-contract: corruption is a failure)
@@ -910,8 +915,8 @@ CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, Des
     const Epoch epoch  = g_epoch.fetch_add(1) + 1; // fencing token per materialization
     auto minted        = std::make_shared<Materialization>();
     minted->state      = std::make_shared<const Snapshot>(std::move(parsed.snapshot));
-    minted->digest     = DraftSnapshotDigest(bytes); // integrity identity
-    minted->revision   = revision;                   // storage identity (empty for artifacts)
+    minted->digest     = draft_snapshot_digest(bytes); // integrity identity
+    minted->revision   = revision;                     // storage identity (empty for artifacts)
     minted->epoch      = epoch;
     minted->quarantine = quarantine;
 
@@ -919,7 +924,7 @@ CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, Des
     return CognitionHandle { minted }; // participants get the immutable handle
 }
 
-Data QivenContext::ReadFromCognition(const CognitionHandle& handle, const Query& query)
+Data QivenContext::read_from_cognition(const CognitionHandle& handle, const Query& query)
 {
     static_cast<void>(query); // typed Bundle with floors lands in Phase 2 (DR-007)
     QIVEN_ASSERT(handle != nullptr);
@@ -928,7 +933,7 @@ Data QivenContext::ReadFromCognition(const CognitionHandle& handle, const Query&
     return serializeImpl(*handle->state);
 }
 
-std::optional<ExecutionGrant> QivenContext::AcquireGrant(const AuthenticatedActor& actor, WorkMode mode)
+std::optional<ExecutionGrant> QivenContext::acquire_grant(const AuthenticatedActor& actor, WorkMode mode)
 {
     std::lock_guard lock(g_admission);
     if (!IsEmpty(g_activeGrantId))
@@ -939,21 +944,22 @@ std::optional<ExecutionGrant> QivenContext::AcquireGrant(const AuthenticatedActo
     {
         g_identity = std::make_shared<RootPrincipalVerifier>();
     }
-    const auto governance = CanonicalHeadLocked(); // context passed IN — no re-entry (P-42)
+    const auto governance = canonical_head_locked(); // context passed IN — no re-entry (P-42)
     if (!governance || !g_identity->verify(actor, *governance))
     {
         return std::nullopt; // identity is never caller-asserted (P-02)
     }
-    static std::uint64_t grantSequence = 0;
-    const Bytes sequence { std::byte { static_cast<unsigned char>((++grantSequence) & 0xFF) } };
-    const GrantId id { "grant-" + qiven::to_hex_u64(
-                                      qiven::fnv1a64_chain(qiven::fnv1a64_offset_basis, actor.principal + "|" + actor.binding, sequence)) };
+    // Full 64-bit monotonic generation: never truncates, never wraps. The
+    // GrantId IS the generation counter (no hash indirection), so stale
+    // grants can never collide with current ones.
+    static std::uint64_t grantGeneration = 0;
+    const GrantId id { "grant-" + std::to_string(++grantGeneration) };
     g_activeGrantId = id;
     g_grantActor    = actor;
     return ExecutionGrant { id, g_epoch.load(), actor.principal, mode };
 }
 
-void QivenContext::ReleaseGrant(const ExecutionGrant& grant)
+void QivenContext::release_grant(const ExecutionGrant& grant)
 {
     std::lock_guard lock(g_admission);
     if (g_activeGrantId == grant.id())
@@ -963,9 +969,9 @@ void QivenContext::ReleaseGrant(const ExecutionGrant& grant)
     }
 }
 
-Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
-                                       const ContextTransaction& transaction,
-                                       const ExecutionGrant& grant)
+Verdict QivenContext::write_to_cognition(const CognitionHandle& handle,
+                                         const ContextTransaction& transaction,
+                                         const ExecutionGrant& grant)
 {
     std::lock_guard lock(g_admission);
     const auto refuse = [](RefusalReason reason) {
@@ -978,7 +984,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
     // refused. Keys without receipts behave as before.
     const std::string requestDigest = transaction.idempotencyKey.empty()
                                           ? std::string {}
-                                          : RequestDigestOf(transaction);
+                                          : request_digest_of(transaction);
     if (!transaction.idempotencyKey.empty())
     {
         const auto receipt = g_receipts.find(transaction.idempotencyKey);
@@ -1001,9 +1007,13 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             break;
         }
     }
-    if (entry == nullptr || entry->materialization->quarantine != QuarantineState::Promoted)
+    if (entry != nullptr && entry->materialization->quarantine != QuarantineState::Promoted)
     {
-        return refuse(RefusalReason::GovernanceDenied); // pit P-33: restore never self-promotes
+        return refuse(RefusalReason::GovernanceDenied);
+    }
+    if (entry == nullptr)
+    {
+        return refuse(RefusalReason::StaleBase); // re-materialize at the head
     }
     // pit.grant_is_port_minted + pit.rejected_flow_stays_fenced:
     // only the minted GrantId is accepted; refusals never de-fence the lease
@@ -1011,7 +1021,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
     {
         return refuse(RefusalReason::GrantRefused); // stale or foreign grants never regain authority
     }
-    const auto governance = CanonicalHeadLocked(); // context passed IN — no re-entry (P-42)
+    const auto governance = canonical_head_locked(); // context passed IN — no re-entry (P-42)
     if (!governance || !g_identity || !g_identity->verify(g_grantActor, *governance))
     {
         return refuse(RefusalReason::UnverifiedActor); // re-checked at commit (ADR-0033 §4)
@@ -1086,7 +1096,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             {
                 return refuse(RefusalReason::HandoffInvalid); // reviewer holds no H2 authority
             }
-            if (transaction.h2->reviewedDeltaDigest != DigestOperations(transaction.operations))
+            if (transaction.h2->reviewedDeltaDigest != digest_operations(transaction.operations))
             {
                 return refuse(RefusalReason::HandoffInvalid); // evidence not bound to THIS delta
             }
@@ -1474,7 +1484,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
     // registry advances to it; the caller's pinned handle keeps its world
     auto successor         = std::make_shared<Materialization>();
     successor->state       = std::make_shared<const Snapshot>(std::move(next));
-    successor->digest      = DraftSnapshotDigest(newState);
+    successor->digest      = draft_snapshot_digest(newState);
     successor->revision    = storeReceipt.revision;
     successor->epoch       = entry->materialization->epoch; // same lineage, same lease
     successor->quarantine  = entry->materialization->quarantine;
@@ -1489,7 +1499,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
     return applied;
 }
 
-RecoveryAction QivenContext::RecoveryFor(const Snapshot& snapshot, RefusalReason reason)
+RecoveryAction QivenContext::recovery_for(const Snapshot& snapshot, RefusalReason reason)
 {
     for (const auto& rule : snapshot.policy.recovery)
     {
@@ -1501,12 +1511,12 @@ RecoveryAction QivenContext::RecoveryFor(const Snapshot& snapshot, RefusalReason
     return RecoveryAction::FailClosed; // unknown refusal: never invent a recovery
 }
 
-Epoch QivenContext::currentEpoch()
+Epoch QivenContext::current_epoch()
 {
     return g_epoch.load(); // lock-free sampling: cheap staleness pre-checks
 }
 
-bool QivenContext::RetireCognition(const CognitionHandle& handle)
+bool QivenContext::retire_cognition(const CognitionHandle& handle)
 {
     std::lock_guard lock(g_admission);
     for (std::size_t i = 0; i < g_live.size(); ++i)
@@ -1520,13 +1530,13 @@ bool QivenContext::RetireCognition(const CognitionHandle& handle)
     return false;
 }
 
-std::shared_ptr<const Snapshot> QivenContext::CanonicalHead()
+std::shared_ptr<const Snapshot> QivenContext::canonical_head()
 {
     std::lock_guard lock(g_admission);
-    return CanonicalHeadLocked();
+    return canonical_head_locked();
 }
 
-std::shared_ptr<const Snapshot> QivenContext::CanonicalHeadLocked()
+std::shared_ptr<const Snapshot> QivenContext::canonical_head_locked()
 {
     if (!g_store)
     {
@@ -1752,14 +1762,14 @@ std::string QivenContext::RenderBundle(const ContextBundle& bundle, OutputView v
     return text;
 }
 
-CognitionHandle QivenContext::VerifyRestored(const CognitionHandle& handle, const AuthenticatedActor& actor)
+CognitionHandle QivenContext::verify_restored(const CognitionHandle& handle, const AuthenticatedActor& actor)
 {
     std::lock_guard lock(g_admission);
     if (!g_identity)
     {
         g_identity = std::make_shared<RootPrincipalVerifier>();
     }
-    const auto governance = CanonicalHeadLocked();
+    const auto governance = canonical_head_locked();
     if (!governance || !g_identity->verify(actor, *governance))
     {
         return nullptr; // only the governance principal touches the state machine
@@ -1770,7 +1780,7 @@ CognitionHandle QivenContext::VerifyRestored(const CognitionHandle& handle, cons
         {
             if (entry.materialization->quarantine != QuarantineState::Isolated)
             {
-                return nullptr; // VerifyRestored applies to restored artifacts only
+                return nullptr; // verify_restored applies to restored artifacts only
             }
             auto verified         = std::make_shared<Materialization>(*entry.materialization);
             verified->quarantine  = QuarantineState::Verified; // minted successor, not mutation
@@ -1781,14 +1791,14 @@ CognitionHandle QivenContext::VerifyRestored(const CognitionHandle& handle, cons
     return nullptr;
 }
 
-CognitionHandle QivenContext::PromoteAuthority(const CognitionHandle& handle, const AuthenticatedActor& actor)
+CognitionHandle QivenContext::promote_authority(const CognitionHandle& handle, const AuthenticatedActor& actor)
 {
     std::lock_guard lock(g_admission);
     if (!g_identity)
     {
         g_identity = std::make_shared<RootPrincipalVerifier>();
     }
-    const auto governance = CanonicalHeadLocked();
+    const auto governance = canonical_head_locked();
     if (!governance || !g_identity->verify(actor, *governance))
     {
         return nullptr; // promotion is a governed act by the root principal only
@@ -1810,9 +1820,9 @@ CognitionHandle QivenContext::PromoteAuthority(const CognitionHandle& handle, co
     return nullptr;
 }
 
-bool QivenContext::IsContinueable(const Human* human, const LLMClientTool* client,
-                                  const Device* device, const LLM* llm,
-                                  const CognitionHandle& handle)
+bool QivenContext::is_continueable(const Human* human, const LLMClientTool* client,
+                                   const Device* device, const LLM* llm,
+                                   const CognitionHandle& handle)
 {
     if (human == nullptr || client == nullptr || device == nullptr || llm == nullptr || !handle)
     {

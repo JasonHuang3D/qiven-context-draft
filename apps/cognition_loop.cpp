@@ -38,7 +38,7 @@ int main()
     // + the authority policy table)
     CognitionSource boot;
     boot.kind      = CognitionSourceKind::CanonicalRemote;
-    const auto cog = QivenContext::CreateCognition(boot);
+    const auto cog = QivenContext::create_cognition(boot);
     std::printf("[ OK ] boot        epoch=%llu head=%s\n",
                 static_cast<unsigned long long>(cog->epoch), cog->revision.value.c_str());
 
@@ -93,7 +93,7 @@ int main()
         evidence.reviewer            = "github:JasonHuang3D";
         evidence.reviewerBinding     = "jason-brother-glm5-3"; // NOT the author binding
         evidence.reviewRef           = "brother-review";
-        evidence.reviewedDeltaDigest = DigestOperations(transaction.operations);
+        evidence.reviewedDeltaDigest = digest_operations(transaction.operations);
         transaction.h2               = evidence;
         return transaction;
     };
@@ -106,15 +106,15 @@ int main()
     // above already proved the write survived a second materialization.
     CognitionSource freshSource;
     freshSource.kind = CognitionSourceKind::CanonicalRemote; // empty id = store head
-    const auto fresh = QivenContext::CreateCognition(freshSource);
+    const auto fresh = QivenContext::create_cognition(freshSource);
     llm->pCognition  = fresh;
-    QivenContext::RetireCognition(cog);
+    QivenContext::retire_cognition(cog);
     std::printf("[ OK ] restore     epoch=%llu decisions=%zu memory=%zu\n",
                 static_cast<unsigned long long>(fresh->epoch), fresh->state->decisions.size(),
                 fresh->state->memory.size());
 
     // continuation check — the only whole-graph predicate
-    if (!QivenContext::IsContinueable(human.get(), client.get(), device.get(), llm.get(), fresh))
+    if (!QivenContext::is_continueable(human.get(), client.get(), device.get(), llm.get(), fresh))
     {
         std::printf("[FAIL] continueable\n");
         return 1;
@@ -123,14 +123,14 @@ int main()
 
     // K4 path: artifact materialization is quarantined — restores cognition but
     // cannot write until a governed authority cutover; corruption fails closed
-    const Bytes artifact = QivenContext::ReadFromCognition(fresh, Query {});
+    const Bytes artifact = QivenContext::read_from_cognition(fresh, Query {});
     CognitionSource artifactSource;
     artifactSource.kind           = CognitionSourceKind::HandoffArtifact;
     artifactSource.inlineBytes    = artifact;
-    artifactSource.expectedDigest = DraftContentId(artifact);
-    const auto restored           = QivenContext::CreateCognition(artifactSource);
-    const auto grant              = QivenContext::AcquireGrant(demoActor(), WorkMode::SupervisedForeground);
-    const bool allowed            = grant.has_value() && QivenContext::WriteToCognition(restored, addLesson("mutate a quarantined restore"), *grant).outcome == Verdict::Outcome::Applied;
+    artifactSource.expectedDigest = draft_content_id(artifact);
+    const auto restored           = QivenContext::create_cognition(artifactSource);
+    const auto grant              = QivenContext::acquire_grant(demoActor(), WorkMode::SupervisedForeground);
+    const bool allowed            = grant.has_value() && QivenContext::write_to_cognition(restored, addLesson("mutate a quarantined restore"), *grant).outcome == Verdict::Outcome::Applied;
     std::printf("[ %s ] k4-quarantine write %s\n", allowed ? "FAIL" : "OK",
                 allowed ? "allowed" : "refused");
 
@@ -139,13 +139,13 @@ int main()
     CognitionSource corruptedSource;
     corruptedSource.kind           = CognitionSourceKind::HandoffArtifact;
     corruptedSource.inlineBytes    = corrupted;
-    corruptedSource.expectedDigest = DraftContentId(artifact);
-    const auto broken              = QivenContext::CreateCognition(corruptedSource);
+    corruptedSource.expectedDigest = draft_content_id(artifact);
+    const auto broken              = QivenContext::create_cognition(corruptedSource);
     std::printf("[ %s ] corrupt artifact restore %s\n", broken ? "FAIL" : "OK",
                 broken ? "accepted" : "failed closed");
     if (grant.has_value())
     {
-        QivenContext::ReleaseGrant(*grant);
+        QivenContext::release_grant(*grant);
     }
 
     const bool ok = !allowed && broken == nullptr;
