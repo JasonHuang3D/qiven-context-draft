@@ -75,15 +75,15 @@ int main()
     snapshot.evidence.push_back(EvidenceRecord { "draft-0000000000000001", "17 suites PASS" });
 
     // roundtrip: serialize -> artifact restore -> serialize must be byte-stable
-    const Bytes first = SerializeSnapshot(snapshot);
+    const Bytes first = serialize_snapshot(snapshot);
     CognitionSource source;
     source.kind           = CognitionSourceKind::HandoffArtifact;
     source.inlineBytes    = first;
-    source.expectedDigest = DraftContentId(first);
-    const auto restored   = QivenContext::CreateCognition(source);
+    source.expectedDigest = draft_content_id(first);
+    const auto restored   = QivenContext::create_cognition(source);
     QCD_CHECK(restored != nullptr);
     QCD_CHECK(restored->quarantine == QuarantineState::Isolated);
-    const Bytes second = SerializeSnapshot(*restored->state);
+    const Bytes second = serialize_snapshot(*restored->state);
 
     std::printf("restored: principal=%zu articles=%zu handoff=%zu recovery=%zu decisions=%zu "
                 "memory=%zu obligations=%zu evidence=%zu state=(%zu,%zu,%zu,%zu) ENDFLAG\n",
@@ -98,7 +98,7 @@ int main()
     QCD_CHECK(first == second);
 
     // the restored instance carries the artifact's content identity
-    QCD_CHECK(restored->digest == DraftSnapshotDigest(first));
+    QCD_CHECK(restored->digest == draft_snapshot_digest(first));
     QCD_CHECK(restored->state->decisions.size() == 1);
     QCD_CHECK(restored->state->obligations[0].id == 7);
 

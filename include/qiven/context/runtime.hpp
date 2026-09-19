@@ -122,7 +122,7 @@ struct LLM
 
     // truthful budget annotation on the checkpoint (observable state only —
     // no invented percentages; MEM-8F2C41)
-    void annotateBudget(std::chrono::steady_clock::time_point turnStart);
+    void annotate_budget(std::chrono::steady_clock::time_point turnStart);
 };
 
 struct LLMClientTool // the relay; NO cognition access (R5)
