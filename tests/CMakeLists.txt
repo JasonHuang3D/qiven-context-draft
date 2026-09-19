@@ -11,6 +11,12 @@ target_link_libraries(qiven-context-draft-cognition PRIVATE qiven::context-draft
 qiven_context_draft_enable_strong_warnings(qiven-context-draft-cognition)
 add_test(NAME qiven-context-draft-cognition COMMAND qiven-context-draft-cognition)
 
+add_executable(qiven-context-draft-memory-leak memory_leak_test.cpp)
+target_link_libraries(qiven-context-draft-memory-leak PRIVATE qiven::context-draft)
+qiven_context_draft_enable_strong_warnings(qiven-context-draft-memory-leak)
+set_target_properties(qiven-context-draft-memory-leak PROPERTIES CXX_EXTENSIONS OFF FOLDER "Tests")
+add_test(NAME qiven-context-draft.memory-leak COMMAND qiven-context-draft-memory-leak)
+
 add_executable(qiven-context-draft-grant-regression grant_regression.cpp)
 target_link_libraries(qiven-context-draft-grant-regression PRIVATE qiven::context-draft)
 qiven_context_draft_enable_strong_warnings(qiven-context-draft-grant-regression)

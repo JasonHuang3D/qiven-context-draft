@@ -749,6 +749,7 @@ namespace
 StoreReceipt MemoryStore::compareAndSwap(const RevisionId& base, const Bytes& stateBytes)
 {
     std::lock_guard lock(mutex_);
+    qiven::memory::AllocationObserver::observe_allocate(stateBytes.size());
     if (!revisions_.empty() && base != head_)
     {
         return StoreReceipt { StoreReceipt::Kind::CompareFailed, {} }; // definitely not committed
@@ -939,8 +940,10 @@ CognitionHandle QivenContext::create_cognition(const CognitionSource& source, De
     const auto parsed = deserializeImpl(bytes);
     if (!parsed.ok)
     {
+        qiven::memory::AllocationObserver::observe_allocate_failure(bytes.size());
         return fail(parsed.error); // corruption fails closed; never an assert (DR-009)
     }
+    qiven::memory::AllocationObserver::observe_allocate(bytes.size());
 
     const Epoch epoch  = g_epoch.fetch_add(1) + 1; // fencing token per materialization
     auto minted        = std::make_shared<Materialization>();
