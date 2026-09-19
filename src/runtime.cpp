@@ -29,6 +29,7 @@ constexpr std::string_view refusalName(RefusalReason reason)
     case RefusalReason::GovernanceDenied: return "governance-denied";
     case RefusalReason::StoreDiverged: return "store-diverged";
     case RefusalReason::OutcomeUnresolved: return "outcome-unresolved";
+    case RefusalReason::KeyConflict: return "key-conflict";
     }
     return "unknown";
 }

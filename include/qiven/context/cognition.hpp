@@ -70,6 +70,8 @@ enum class RefusalReason
     GovernanceDenied,   // quarantined state or policy refuses this actor/op
     StoreDiverged,      // store-level CAS failed: fail closed
     OutcomeUnresolved,  // commit outcome unknown: dependent work stops
+    KeyConflict,        // idempotency key reused with different content
+    ConflictUnresolved, // an open canonical conflict blocks this acceptance
 };
 
 enum class RecoveryAction
@@ -90,10 +92,26 @@ struct RecoveryRule
 
 enum class OperationClass
 {
-    DecisionAcceptance, // merge-class semantics
+    DecisionAcceptance, // merge-class semantics (accept + supersede)
     MemoryWrite,
     ObligationWrite,
     StateUpdate,
+    ConflictWrite,
+    EvidenceWrite,
+};
+
+struct Conflict // constitution 11: conflict is first-class epistemic state;
+{               // an OPEN conflict blocks intersecting acceptances (DR-006)
+    ContentId id;
+    enum class Status
+    {
+        Open,
+        Resolved,
+    };
+    Status status { Status::Open };
+    std::string scope; // empty = global (blocks everything)
+    std::string description;
+    std::string resolution; // required when Resolved
 };
 
 struct HandoffPolicy // the ADR-0036 classification table, as data
@@ -211,5 +229,6 @@ struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
     std::vector<MemoryRecord> memory;
     std::vector<Obligation> obligations;
     std::vector<EvidenceRecord> evidence;
+    std::vector<Conflict> conflicts;
 };
 } // namespace qiven::context
