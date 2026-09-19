@@ -8,7 +8,10 @@
 
 #include <qiven/context/runtime.hpp> // IsContinueable inspects participant fields
 
+#include <qiven/byte_cursor.hpp>
 #include <qiven/contracts.hpp>
+#include <qiven/endian.hpp>
+#include <qiven/hashing.hpp>
 
 #include <algorithm>
 #include <cstdio>
@@ -69,10 +72,16 @@ void putStr(Bytes& bytes, const std::string& value)
 // assert (DR-009 — asserts compile away in Release and the artifact path is
 // untrusted input) -----------------------------------------------------------
 
-struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
-{
-    const Bytes& bytes;
-    std::size_t offset { 0 };
+struct Reader
+{ // composed over the FOUNDATION primitives (qiven::ByteCursor + qiven::endian):
+  // bounded reads and endianness come from the lower layer; this struct adds
+  // only the domain-typed failure taxonomy (pit.release_deserialize_safe)
+    explicit Reader(const Bytes& input) :
+    cursor(std::span<const std::byte>(input.data(), input.size()))
+    {
+    }
+
+    qiven::ByteCursor cursor;
     std::optional<DeserializeError> error;
 
     [[nodiscard]] bool ok() const
@@ -82,9 +91,9 @@ struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
 
     [[nodiscard]] bool need(std::size_t count, const char* what)
     {
-        if (ok() && offset + count > bytes.size())
+        if (ok() && cursor.remaining() < count)
         {
-            error = DeserializeError { DeserializeError::Kind::Truncated, offset, what };
+            error = DeserializeError { DeserializeError::Kind::Truncated, 0, what };
             return false;
         }
         return ok();
@@ -96,7 +105,7 @@ struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
         {
             return 0;
         }
-        return std::to_integer<std::uint8_t>(bytes[offset++]);
+        return std::to_integer<std::uint8_t>(cursor.take(1).value().front());
     }
 
     [[nodiscard]] std::uint32_t u32(const char* what)
@@ -105,12 +114,7 @@ struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
         {
             return 0;
         }
-        std::uint32_t value = 0;
-        for (unsigned shift = 0; shift < 32; shift += 8)
-        {
-            value |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(bytes[offset++])) << shift;
-        }
-        return value;
+        return *qiven::decode_le_u32(cursor.take(4).value());
     }
 
     [[nodiscard]] std::uint64_t u64(const char* what)
@@ -119,12 +123,7 @@ struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
         {
             return 0;
         }
-        std::uint64_t value = 0;
-        for (unsigned shift = 0; shift < 64; shift += 8)
-        {
-            value |= static_cast<std::uint64_t>(std::to_integer<unsigned char>(bytes[offset++])) << shift;
-        }
-        return value;
+        return *qiven::decode_le_u64(cursor.take(8).value());
     }
 
     [[nodiscard]] std::int64_t i64(const char* what)
@@ -146,14 +145,8 @@ struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
         {
             return {};
         }
-        std::string value;
-        value.resize(length);
-        if (length > 0)
-        {
-            std::memcpy(value.data(), bytes.data() + offset, length);
-        }
-        offset += length;
-        return value;
+        const auto span = cursor.take(length).value();
+        return { reinterpret_cast<const char*>(span.data()), span.size() };
     }
 
     template <typename E>
@@ -166,7 +159,7 @@ struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
         }
         if (raw > maxValue)
         {
-            error = DeserializeError { DeserializeError::Kind::BadEnum, offset - 1, what };
+            error = DeserializeError { DeserializeError::Kind::BadEnum, 0, what };
             return static_cast<E>(0);
         }
         return static_cast<E>(raw);
@@ -177,7 +170,7 @@ struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
         const auto count = u32(what);
         if (ok() && count > kMaxRecords)
         {
-            error = DeserializeError { DeserializeError::Kind::ResourceAbuse, offset - 4, what };
+            error = DeserializeError { DeserializeError::Kind::ResourceAbuse, 0, what };
             return 0;
         }
         return count;
@@ -195,7 +188,6 @@ struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
         return values;
     }
 };
-
 Bytes serializeImpl(const Snapshot& snapshot)
 {
     Bytes bytes;
@@ -518,9 +510,9 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
         }
     }
 
-    if (reader.ok() && reader.offset != bytes.size())
+    if (reader.ok() && !reader.cursor.empty())
     {
-        reader.error = DeserializeError { DeserializeError::Kind::Truncated, reader.offset,
+        reader.error = DeserializeError { DeserializeError::Kind::Truncated, 0,
                                           "trailing bytes after snapshot" };
     }
 
@@ -668,38 +660,20 @@ const ProfileRecord* findProfile(const Snapshot& snapshot, const std::string& id
     return nullptr;
 }
 
-std::uint64_t fnv1a(const std::string& text, const Bytes& bytes)
-{
-    std::uint64_t hash = 1469598103934665603ULL; // FNV-1a 64 — draft stand-in for SHA-256
-    for (const char ch : text)
-    {
-        hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(ch));
-        hash *= 1099511628211ULL;
-    }
-    for (const std::byte byte : bytes)
-    {
-        hash ^= static_cast<std::uint64_t>(std::to_integer<unsigned char>(byte));
-        hash *= 1099511628211ULL;
-    }
-    return hash;
-}
-
-std::string hex64(std::uint64_t hash)
-{
-    char text[17];
-    std::snprintf(text, sizeof text, "%016llx", static_cast<unsigned long long>(hash));
-    return std::string(text);
-}
 } // namespace
 
+// content and digest identities are minted with the FOUNDATION primitive
+// (qiven::fnv1a64 / qiven::to_hex_u64 - foundation hashing.hpp and the
+// distillation doc); FNV-1a is not cryptographic, the production engine
+// mints SHA-256 digests at the kernel layer
 ContentId DraftContentId(const Bytes& stateBytes)
 {
-    return "draft-" + hex64(fnv1a("", stateBytes));
+    return "draft-" + qiven::to_hex_u64(qiven::fnv1a64(stateBytes));
 }
 
 SnapshotDigest DraftSnapshotDigest(const Bytes& stateBytes)
 {
-    return SnapshotDigest { "snap-" + hex64(fnv1a("", stateBytes)) };
+    return SnapshotDigest { "snap-" + qiven::to_hex_u64(qiven::fnv1a64(stateBytes)) };
 }
 
 ContentId DigestOperations(const std::vector<Operation>& operations)
@@ -758,7 +732,8 @@ StoreReceipt MemoryStore::compareAndSwap(const RevisionId& base, const Bytes& st
         // idempotent re-commit: the head already holds exactly these bytes
         return StoreReceipt { StoreReceipt::Kind::Committed, head_ };
     }
-    const RevisionId id { "rev-" + hex64(fnv1a(base.value, stateBytes)) };
+    const RevisionId id { "rev-" + qiven::to_hex_u64(
+                                       qiven::fnv1a64_chain(qiven::fnv1a64_offset_basis, base.value, stateBytes)) };
     revisions_.emplace_back(id, stateBytes);
     head_ = id;
     return StoreReceipt { StoreReceipt::Kind::Committed, id };
@@ -971,7 +946,8 @@ std::optional<ExecutionGrant> QivenContext::AcquireGrant(const AuthenticatedActo
     }
     static std::uint64_t grantSequence = 0;
     const Bytes sequence { std::byte { static_cast<unsigned char>((++grantSequence) & 0xFF) } };
-    const GrantId id { "grant-" + hex64(fnv1a(actor.principal + "|" + actor.binding, sequence)) };
+    const GrantId id { "grant-" + qiven::to_hex_u64(
+                                      qiven::fnv1a64_chain(qiven::fnv1a64_offset_basis, actor.principal + "|" + actor.binding, sequence)) };
     g_activeGrantId = id;
     g_grantActor    = actor;
     return ExecutionGrant { id, g_epoch.load(), actor.principal, mode };
