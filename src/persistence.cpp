@@ -205,7 +205,7 @@ Bytes serializeImpl(const Snapshot& snapshot)
     for (const auto& row : snapshot.policy.handoff)
     {
         putU8(bytes, static_cast<std::uint8_t>(row.opClass));
-        putU8(bytes, row.requiresH2 ? 1 : 0);
+        putU8(bytes, static_cast<std::uint8_t>(row.required));
         putU8(bytes, row.rootPrincipalOnly ? 1 : 0);
     }
     putU32(bytes, static_cast<std::uint32_t>(snapshot.policy.recovery.size()));
@@ -243,7 +243,9 @@ Bytes serializeImpl(const Snapshot& snapshot)
         putU32(bytes, static_cast<std::uint32_t>(decision.provenance.sources.size()));
         for (const auto& source : decision.provenance.sources)
         {
-            putStr(bytes, source);
+            putU8(bytes, static_cast<std::uint8_t>(source.kind));
+            putStr(bytes, source.reference);
+            putStr(bytes, source.note);
         }
     }
 
@@ -257,7 +259,9 @@ Bytes serializeImpl(const Snapshot& snapshot)
         putU32(bytes, static_cast<std::uint32_t>(record.provenance.sources.size()));
         for (const auto& source : record.provenance.sources)
         {
-            putStr(bytes, source);
+            putU8(bytes, static_cast<std::uint8_t>(source.kind));
+            putStr(bytes, source.reference);
+            putStr(bytes, source.note);
         }
     }
 
@@ -337,7 +341,7 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
         {
             HandoffPolicy row;
             row.opClass           = reader.enumValue<OperationClass>("handoff op class", 5);
-            row.requiresH2        = reader.u8("handoff requiresH2") != 0;
+            row.required          = reader.enumValue<Handoff>("handoff required", 4);
             row.rootPrincipalOnly = reader.u8("handoff rootPrincipalOnly") != 0;
             snapshot.policy.handoff.push_back(row);
         }
@@ -390,7 +394,18 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
             {
                 decision.supersededBy.push_back(reader.i64("supersededBy id"));
             }
-            decision.provenance.sources = reader.stringVector("decision provenance");
+            {
+                const auto provCount = reader.cappedCount("decision provenance");
+                decision.provenance.sources.reserve(provCount);
+                for (std::uint32_t k = 0; reader.ok() && k < provCount; ++k)
+                {
+                    SourceType s;
+                    s.kind      = reader.enumValue<SourceType::Kind>("prov kind", 5);
+                    s.reference = reader.str("prov reference");
+                    s.note      = reader.str("prov note");
+                    decision.provenance.sources.push_back(std::move(s));
+                }
+            }
             if (reader.ok())
             {
                 snapshot.decisions.push_back(std::move(decision));
@@ -411,9 +426,20 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
             {
                 break;
             }
-            record.title              = reader.str("memory title");
-            record.statement          = reader.str("memory statement");
-            record.provenance.sources = reader.stringVector("memory provenance");
+            record.title     = reader.str("memory title");
+            record.statement = reader.str("memory statement");
+            {
+                const auto provCount = reader.cappedCount("memory provenance");
+                record.provenance.sources.reserve(provCount);
+                for (std::uint32_t k = 0; reader.ok() && k < provCount; ++k)
+                {
+                    SourceType s;
+                    s.kind      = reader.enumValue<SourceType::Kind>("prov kind", 5);
+                    s.reference = reader.str("prov reference");
+                    s.note      = reader.str("prov note");
+                    record.provenance.sources.push_back(std::move(s));
+                }
+            }
             if (reader.ok())
             {
                 snapshot.memory.push_back(std::move(record));
@@ -560,12 +586,12 @@ PolicyTable makeDefaultPolicy()
   // as typed Verdict reasons with the mandated authoring-path switch
     PolicyTable policy;
     policy.handoff = {
-        { OperationClass::DecisionAcceptance, true, false }, // merge-class: H2 mandatory
-        { OperationClass::MemoryWrite, false, false },
-        { OperationClass::ObligationWrite, false, false },
-        { OperationClass::StateUpdate, false, false },
-        { OperationClass::ConflictWrite, false, false },
-        { OperationClass::EvidenceWrite, false, false },
+        { OperationClass::DecisionAcceptance, Handoff::H2_Review, false },
+        { OperationClass::MemoryWrite, Handoff::H_None, false },
+        { OperationClass::ObligationWrite, Handoff::H_None, false },
+        { OperationClass::StateUpdate, Handoff::H_None, false },
+        { OperationClass::ConflictWrite, Handoff::H_None, false },
+        { OperationClass::EvidenceWrite, Handoff::H_None, false },
     };
     policy.recovery = {
         { RefusalReason::StaleBase, RecoveryAction::RereadRethink },
@@ -1080,7 +1106,7 @@ Verdict QivenContext::write_to_cognition(const CognitionHandle& handle,
         {
             return refuse(RefusalReason::GovernanceDenied); // unregistered operation class
         }
-        if (row->requiresH2)
+        if (row->required == Handoff::H2_Review)
         {
             // pit.handoff_has_no_waiver_path: every branch below refuses
             if (!transaction.h2.has_value())
@@ -1331,7 +1357,7 @@ Verdict QivenContext::write_to_cognition(const CognitionHandle& handle,
                                                 operation.payload,
                                                 {},
                                                 {},
-                                                Provenance { { transaction.handoffEvidenceRef } } });
+                                                Provenance { std::vector<SourceType> { SourceType { SourceType::Kind::UserStatement, transaction.handoffEvidenceRef, "" } } } });
             break;
         case Operation::Kind::SupersedeDecision:
             for (auto& decision : next.decisions)
@@ -1350,14 +1376,16 @@ Verdict QivenContext::write_to_cognition(const CognitionHandle& handle,
         case Operation::Kind::AddMemory:
             // aux carries the MemoryRecord::Kind: negative knowledge is a floor
             next.memory.push_back(MemoryRecord { static_cast<MemoryRecord::Kind>(operation.aux),
+                                                 EpistemicType::Verified,
                                                  MemoryRecord::Status::Active,
                                                  operation.title,
                                                  operation.payload,
-                                                 Provenance { { operation.provenanceRef } } });
+                                                 Provenance { std::vector<SourceType> { SourceType { SourceType::Kind::UserStatement, operation.provenanceRef, "" } } } });
             break;
         case Operation::Kind::UpsertObligation:
             next.obligations.push_back(Obligation { Obligation::Status::Open,
                                                     Obligation::TriggerKind::Manual,
+                                                    "", // triggerValue (set via SetNextBoundary or dedicated op)
                                                     operation.recordId,
                                                     operation.payload,
                                                     {} });
@@ -1649,7 +1677,7 @@ ContextBundle QivenContext::BuildBundle(const CognitionHandle& handle, const Que
     // protected constraints, derived verbatim from the policy table in cognition
     for (const auto& row : snapshot.policy.handoff)
     {
-        if (row.requiresH2)
+        if (row.required == Handoff::H2_Review)
         {
             bundle.protectedConstraints.push_back(
                 "H2 review evidence is mandatory for this operation class");
