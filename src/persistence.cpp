@@ -867,6 +867,11 @@ CognitionHandle QivenContext::create_cognition(const CognitionSource& source, De
         QIVEN_ASSERT(g_store != nullptr); // only the cold-boot path needs a store
         const RevisionId id = IsEmpty(source.revision) ? g_store->head() : source.revision;
         bytes               = g_store->materialize(id);
+        if (bytes.empty() && !IsEmpty(id))
+        {
+            return fail(DeserializeError { DeserializeError::Kind::Truncated, 0,
+                                           "revision not found: " + id.value });
+        }
         if (bytes.empty())
         {
             // genesis: no canonical state yet — materialize the empty cognition
@@ -944,10 +949,11 @@ std::optional<ExecutionGrant> QivenContext::acquire_grant(const AuthenticatedAct
     {
         return std::nullopt; // identity is never caller-asserted (P-02)
     }
-    static std::uint64_t grantSequence = 0;
-    const Bytes sequence { std::byte { static_cast<unsigned char>((++grantSequence) & 0xFF) } };
-    const GrantId id { "grant-" + qiven::to_hex_u64(
-                                      qiven::fnv1a64_chain(qiven::fnv1a64_offset_basis, actor.principal + "|" + actor.binding, sequence)) };
+    // Full 64-bit monotonic generation: never truncates, never wraps. The
+    // GrantId IS the generation counter (no hash indirection), so stale
+    // grants can never collide with current ones.
+    static std::uint64_t grantGeneration = 0;
+    const GrantId id { "grant-" + std::to_string(++grantGeneration) };
     g_activeGrantId = id;
     g_grantActor    = actor;
     return ExecutionGrant { id, g_epoch.load(), actor.principal, mode };
@@ -1001,9 +1007,13 @@ Verdict QivenContext::write_to_cognition(const CognitionHandle& handle,
             break;
         }
     }
-    if (entry == nullptr || entry->materialization->quarantine != QuarantineState::Promoted)
+    if (entry != nullptr && entry->materialization->quarantine != QuarantineState::Promoted)
     {
-        return refuse(RefusalReason::GovernanceDenied); // pit P-33: restore never self-promotes
+        return refuse(RefusalReason::GovernanceDenied);
+    }
+    if (entry == nullptr)
+    {
+        return refuse(RefusalReason::StaleBase); // re-materialize at the head
     }
     // pit.grant_is_port_minted + pit.rejected_flow_stays_fenced:
     // only the minted GrantId is accepted; refusals never de-fence the lease

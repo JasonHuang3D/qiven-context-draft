@@ -5,6 +5,9 @@
 // looked up in the policy table carried by cognition, and the mandated next
 // action is recorded in the checkpoint. Only StaleBase parks a delta for a
 // re-think; handoff refusals halt and escalate — retrying is forbidden.
+//
+// DR-012: annotate_budget is called on EVERY completed turn — success,
+// refusal, and no-op alike. The model never chooses its own recovery.
 // ============================================================================
 
 #include <qiven/context/runtime.hpp>
@@ -40,8 +43,16 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
                WorkMode mode)
 {
     const auto turnStart = std::chrono::steady_clock::now(); // session economics (DR-012)
-    const auto handle    = pCognition;                       // pin lifetime for this whole cycle;
-                                                             // authority is fenced by the grant (DR-010)
+    work_impl(prompt, actor, result, mode, turnStart);
+    annotate_budget(turnStart); // EVERY completed turn: success, refusal, no-op
+}
+
+void LLM::work_impl(const std::string& prompt, const AuthenticatedActor& actor,
+                    std::string& result, WorkMode mode,
+                    std::chrono::steady_clock::time_point turnStart)
+{
+    const auto handle = pCognition; // pin lifetime for this whole cycle;
+                                    // authority is fenced by the grant (DR-010)
     if (!handle)
     {
         result = name + ": no cognition bound";
@@ -133,7 +144,6 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
         break;
     }
     result = name + ": refused (" + std::string(refusalName(verdict.reason)) + "); next: " + checkpoint.nextAction;
-    annotate_budget(turnStart);
 }
 
 void LLM::annotate_budget(std::chrono::steady_clock::time_point turnStart) // pit.liveness_reports_observables
