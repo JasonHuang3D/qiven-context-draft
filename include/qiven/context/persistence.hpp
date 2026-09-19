@@ -89,7 +89,7 @@ public:
 
 // in-memory reference implementation (proves the contract; used by tests/demo)
 class MemoryStore final : public ICognitionStore
-{
+{ // thread-safe: all methods hold an internal mutex (review §4)
 public:
     [[nodiscard]] StoreReceipt compareAndSwap(const RevisionId& base, const Bytes& stateBytes) override;
     [[nodiscard]] Bytes materialize(const RevisionId& revision) const override;
@@ -97,6 +97,7 @@ public:
     [[nodiscard]] RevisionId head() const override;
 
 private:
+    mutable std::mutex mutex_;
     std::vector<std::pair<RevisionId, Bytes>> revisions_; // linear history, genesis first
     RevisionId head_ {};
 };

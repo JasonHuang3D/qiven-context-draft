@@ -722,6 +722,7 @@ namespace
 
 StoreReceipt MemoryStore::compareAndSwap(const RevisionId& base, const Bytes& stateBytes)
 {
+    std::lock_guard lock(mutex_);
     if (!revisions_.empty() && base != head_)
     {
         return StoreReceipt { StoreReceipt::Kind::CompareFailed, {} }; // definitely not committed
@@ -741,6 +742,7 @@ StoreReceipt MemoryStore::compareAndSwap(const RevisionId& base, const Bytes& st
 
 Bytes MemoryStore::materialize(const RevisionId& revision) const
 {
+    std::lock_guard lock(mutex_);
     for (const auto& [key, stateBytes] : revisions_)
     {
         if (key == revision)
@@ -753,6 +755,7 @@ Bytes MemoryStore::materialize(const RevisionId& revision) const
 
 bool MemoryStore::verify(const RevisionId& revision) const
 {
+    std::lock_guard lock(mutex_);
     for (const auto& [key, stateBytes] : revisions_)
     {
         static_cast<void>(stateBytes);
@@ -766,6 +769,7 @@ bool MemoryStore::verify(const RevisionId& revision) const
 
 RevisionId MemoryStore::head() const
 {
+    std::lock_guard lock(mutex_);
     return head_;
 }
 
