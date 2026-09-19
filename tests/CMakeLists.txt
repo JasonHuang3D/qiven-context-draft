@@ -11,6 +11,19 @@ target_link_libraries(qiven-context-draft-cognition PRIVATE qiven::context-draft
 qiven_context_draft_enable_strong_warnings(qiven-context-draft-cognition)
 add_test(NAME qiven-context-draft-cognition COMMAND qiven-context-draft-cognition)
 
+add_executable(qiven-context-draft-grant-regression grant_regression.cpp)
+target_link_libraries(qiven-context-draft-grant-regression PRIVATE qiven::context-draft)
+qiven_context_draft_enable_strong_warnings(qiven-context-draft-grant-regression)
+
+set_target_properties(
+    qiven-context-draft-grant-regression
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+        FOLDER "Tests"
+)
+
+add_test(NAME qiven-context-draft-grant-regression COMMAND qiven-context-draft-grant-regression)
+
 add_executable(qiven-context-draft-persistence persistence_fencing.cpp)
 target_link_libraries(qiven-context-draft-persistence PRIVATE qiven::context-draft)
 qiven_context_draft_enable_strong_warnings(qiven-context-draft-persistence)
