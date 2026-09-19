@@ -41,7 +41,7 @@ ContextTransaction knownWrite(const RevisionId& base, std::int64_t decisionId)
                                                  .title         = "rejected alternative",
                                                  .payload       = "event-sourcing was rejected: state-replication only",
                                                  .provenanceRef = "ADR-0033-alternatives" });
-    transaction.h2 = H2Evidence { DigestOperations(transaction.operations),
+    transaction.h2 = H2Evidence { digest_operations(transaction.operations),
                                   "github:JasonHuang3D", "jason-brother-glm5-3", "trial-producer" };
     return transaction;
 }
@@ -86,19 +86,19 @@ int main(int argc, char** argv)
         QivenContext::attachStore(store);
         CognitionSource boot;
         boot.kind     = CognitionSourceKind::CanonicalRemote;
-        const auto c1 = QivenContext::CreateCognition(boot);
+        const auto c1 = QivenContext::create_cognition(boot);
 
         const auto actor = AuthenticatedActor { "github:JasonHuang3D", Role::Worker,
                                                 "GLM-5.3-Flash", "GLM-5.3-Flash", "standard" };
-        const auto grant = QivenContext::AcquireGrant(actor, WorkMode::SupervisedForeground);
+        const auto grant = QivenContext::acquire_grant(actor, WorkMode::SupervisedForeground);
         if (!grant.has_value())
         {
             std::printf("[FAIL] producer could not acquire the lease\n");
             return 1;
         }
         const auto verdict =
-            QivenContext::WriteToCognition(c1, knownWrite(c1->revision, 1), *grant);
-        QivenContext::ReleaseGrant(*grant);
+            QivenContext::write_to_cognition(c1, knownWrite(c1->revision, 1), *grant);
+        QivenContext::release_grant(*grant);
         if (verdict.outcome != Verdict::Outcome::Applied)
         {
             std::printf("[FAIL] producer write refused (%d)\n", static_cast<int>(verdict.reason));
@@ -107,7 +107,7 @@ int main(int argc, char** argv)
         CognitionSource headSource;
         headSource.kind     = CognitionSourceKind::CanonicalRemote;
         headSource.revision = verdict.successor->revision;
-        const auto head     = QivenContext::CreateCognition(headSource);
+        const auto head     = QivenContext::create_cognition(headSource);
         if (!head)
         {
             const std::string eol(1, char(10));
@@ -116,8 +116,8 @@ int main(int argc, char** argv)
         }
 
         // the ARTIFACT: self-describing, content-identified, no credentials
-        const Bytes bytes         = SerializeSnapshot(*head->state);
-        const ContentId contentId = DraftContentId(bytes); // restore identity
+        const Bytes bytes         = serialize_snapshot(*head->state);
+        const ContentId contentId = draft_content_id(bytes); // restore identity
         std::ostringstream artifact;
         artifact << "qiven-artifact v1\n";
         artifact << "snapshot-digest: " << head->digest.value << "\n"; // integrity identity
@@ -179,12 +179,12 @@ int main(int argc, char** argv)
         {
             bytes.push_back(std::byte { static_cast<unsigned char>(value) });
         }
-        if (DraftContentId(bytes) != declaredContentId)
+        if (draft_content_id(bytes) != declaredContentId)
         {
             std::printf("[FAIL] content-id mismatch: declared %s\n", declaredContentId.c_str());
             return 1;
         }
-        const SnapshotDigest actual = DraftSnapshotDigest(bytes);
+        const SnapshotDigest actual = draft_snapshot_digest(bytes);
         if (actual.value != declaredDigest)
         {
             std::printf("[FAIL] digest mismatch: declared %s actual %s\n", declaredDigest.c_str(),
@@ -198,7 +198,7 @@ int main(int argc, char** argv)
         source.kind           = CognitionSourceKind::HandoffArtifact;
         source.inlineBytes    = bytes;
         source.expectedDigest = declaredContentId;
-        const auto restored   = QivenContext::CreateCognition(source, &error);
+        const auto restored   = QivenContext::create_cognition(source, &error);
         if (restored == nullptr)
         {
             std::printf("[FAIL] restore failed closed: kind=%d %s\n",

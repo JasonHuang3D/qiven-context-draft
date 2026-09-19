@@ -64,7 +64,7 @@ ContextTransaction lessonTx(const RevisionId& base)
 
 // pit.port_never_reenters_service (P-42): the identity port receives the
 // governance snapshot as context. Before the 2026-09-19 fix, the draft
-// verifier called CanonicalHead() itself and re-locked the admission mutex on
+// verifier called canonical_head() itself and re-locked the admission mutex on
 // the same thread — MSVC Debug throws resource_deadlock_would_occur.
 class RecordingVerifier final : public IIdentityVerifier
 {
@@ -97,7 +97,7 @@ ContextTransaction decisionTx(const RevisionId& base, std::int64_t id, bool with
         evidence.reviewer            = "github:JasonHuang3D";  // root-tier H2 authority
         evidence.reviewerBinding     = "jason-brother-glm5-3"; // NOT the author binding
         evidence.reviewRef           = "PR-record review";
-        evidence.reviewedDeltaDigest = DigestOperations(transaction.operations);
+        evidence.reviewedDeltaDigest = digest_operations(transaction.operations);
         transaction.h2               = evidence;
     }
     return transaction;
@@ -108,7 +108,7 @@ int main()
 {
     const auto store = freshStore();
     DeserializeError bootErr;
-    const auto c1 = QivenContext::CreateCognition(bootFromHead(), &bootErr); // genesis, epoch 1
+    const auto c1 = QivenContext::create_cognition(bootFromHead(), &bootErr); // genesis, epoch 1
     if (!c1)
     {
         std::printf("boot failed: kind=%d offset=%zu detail=%s\n", static_cast<int>(bootErr.kind),
@@ -128,38 +128,38 @@ int main()
     // pit.port_never_reenters_service (P-42): the identity port receives the
     // governance snapshot as context
     const auto recorder = std::make_shared<RecordingVerifier>();
-    QivenContext::attachIdentityVerifier(recorder);
-    const auto portGrant = QivenContext::AcquireGrant(goodActor(), WorkMode::SupervisedForeground);
+    QivenContext::attach_identity_verifier(recorder);
+    const auto portGrant = QivenContext::acquire_grant(goodActor(), WorkMode::SupervisedForeground);
     QCD_CHECK(portGrant.has_value());
     QCD_CHECK(recorder->called);
     QCD_CHECK(recorder->sawGovernance);
-    QivenContext::ReleaseGrant(*portGrant);
-    QivenContext::attachIdentityVerifier(nullptr); // restore the default port
+    QivenContext::release_grant(*portGrant);
+    QivenContext::attach_identity_verifier(nullptr); // restore the default port
 
     // pit.unverified_actor_refused (P-02)
-    QCD_CHECK(!QivenContext::AcquireGrant(stranger(), WorkMode::SupervisedForeground).has_value());
+    QCD_CHECK(!QivenContext::acquire_grant(stranger(), WorkMode::SupervisedForeground).has_value());
 
     const auto actor = goodActor();
-    const auto g1    = QivenContext::AcquireGrant(actor, WorkMode::SupervisedForeground);
+    const auto g1    = QivenContext::acquire_grant(actor, WorkMode::SupervisedForeground);
     QCD_CHECK(g1.has_value());
 
     // pit.split_brain_second_flow_refused (P-01): fail-closed, never queued
-    QCD_CHECK(!QivenContext::AcquireGrant(actor, WorkMode::SupervisedForeground).has_value());
-    QCD_CHECK(!QivenContext::AcquireGrant(stranger(), WorkMode::SupervisedForeground).has_value());
+    QCD_CHECK(!QivenContext::acquire_grant(actor, WorkMode::SupervisedForeground).has_value());
+    QCD_CHECK(!QivenContext::acquire_grant(stranger(), WorkMode::SupervisedForeground).has_value());
 
     // keyed write → applied; the SUCCESSOR MATERIALIZATION is minted (review §2)
     ContextTransaction keyed = lessonTx(c1->revision);
     keyed.idempotencyKey     = "txn-alpha-001";
-    const auto keyedApply    = QivenContext::WriteToCognition(c1, keyed, *g1);
+    const auto keyedApply    = QivenContext::write_to_cognition(c1, keyed, *g1);
     QCD_CHECK(keyedApply.outcome == Verdict::Outcome::Applied);
     const RevisionId head1 = keyedApply.successor->revision;
     QCD_CHECK(store->head() == head1);
-    QCD_CHECK(keyedApply.successor->digest == DraftSnapshotDigest(SerializeSnapshot(*keyedApply.successor->state)));
+    QCD_CHECK(keyedApply.successor->digest == draft_snapshot_digest(serialize_snapshot(*keyedApply.successor->state)));
     QCD_CHECK(c1->revision != head1); // the pinned handle kept its OWN world
 
     // pit.same_key_one_outcome (DR-011): verbatim re-send resolves to the
     // original verdict without re-executing
-    const auto replayed = QivenContext::WriteToCognition(c1, keyed, *g1);
+    const auto replayed = QivenContext::write_to_cognition(c1, keyed, *g1);
     if (replayed.outcome != Verdict::Outcome::Applied)
     {
         const std::string replayEol(1, '\n');
@@ -172,7 +172,7 @@ int main()
     // pit.same_key_different_content_refused
     ContextTransaction conflicting    = keyed;
     conflicting.operations[0].payload = "a DIFFERENT request under the same key";
-    QCD_CHECK(QivenContext::WriteToCognition(c1, conflicting, *g1).reason == RefusalReason::KeyConflict);
+    QCD_CHECK(QivenContext::write_to_cognition(c1, conflicting, *g1).reason == RefusalReason::KeyConflict);
 
     // pit.timeout_yields_unknown_not_rollback (review §6): lost ack ≠ rollback
     class FaultInjectionStore final : public ICognitionStore
@@ -214,11 +214,11 @@ int main()
     flaky->loseNextAck      = true;
     ContextTransaction lost = lessonTx(keyedApply.successor->revision);
     lost.idempotencyKey     = "txn-beta-002";
-    const auto unknown      = QivenContext::WriteToCognition(keyedApply.successor, lost, *g1);
+    const auto unknown      = QivenContext::write_to_cognition(keyedApply.successor, lost, *g1);
     QCD_CHECK(unknown.outcome == Verdict::Outcome::OutcomeUnknown);
-    QCD_CHECK(QivenContext::RecoveryFor(*keyedApply.successor->state,
-                                        RefusalReason::OutcomeUnresolved) == RecoveryAction::Block);
-    const auto resolved = QivenContext::WriteToCognition(keyedApply.successor, lost, *g1);
+    QCD_CHECK(QivenContext::recovery_for(*keyedApply.successor->state,
+                                         RefusalReason::OutcomeUnresolved) == RecoveryAction::Block);
+    const auto resolved = QivenContext::write_to_cognition(keyedApply.successor, lost, *g1);
     QCD_CHECK(resolved.outcome == Verdict::Outcome::OutcomeUnknown); // receipt, not re-execution
     QCD_CHECK(store->head() != keyedApply.successor->revision);      // the commit HAD landed
     QivenContext::attachStore(store);                                // restore the honest store
@@ -226,48 +226,48 @@ int main()
     static_cast<void>(memoryAtUnknown);
 
     // a released lease never regains authority
-    QivenContext::ReleaseGrant(*g1);
-    QCD_CHECK(QivenContext::WriteToCognition(keyedApply.successor, lessonTx(head1), *g1).reason == RefusalReason::GrantRefused);
-    const auto g1b = QivenContext::AcquireGrant(actor, WorkMode::SupervisedForeground);
+    QivenContext::release_grant(*g1);
+    QCD_CHECK(QivenContext::write_to_cognition(keyedApply.successor, lessonTx(head1), *g1).reason == RefusalReason::GrantRefused);
+    const auto g1b = QivenContext::acquire_grant(actor, WorkMode::SupervisedForeground);
     QCD_CHECK(g1b.has_value());
 
     // the BLOCKED lineage: after an OutcomeUnknown, dependent mutations on the
     // stale materialization stop (recovery = Block; the store CAS fails because
     // the head advanced) — dependent work stops without a rollback claim
-    QCD_CHECK(QivenContext::WriteToCognition(
+    QCD_CHECK(QivenContext::write_to_cognition(
                   keyedApply.successor, lessonTx(keyedApply.successor->revision), *g1b)
                   .reason == RefusalReason::StoreDiverged);
 
     // pit.reader_boot_preserves_writer (DR-010): re-materialize the lineage and
     // a reader boot — neither revokes the active writer's lease
-    const auto c2 = QivenContext::CreateCognition(bootFromHead());
+    const auto c2 = QivenContext::create_cognition(bootFromHead());
     QCD_CHECK(c2 != nullptr);
     QCD_CHECK(c2->epoch > c1->epoch); // epochs are monotonic per materialization
     QCD_CHECK(c2->revision == store->head());
-    const auto writer = QivenContext::CreateCognition(bootFromHead());
-    QCD_CHECK(QivenContext::WriteToCognition(
+    const auto writer = QivenContext::create_cognition(bootFromHead());
+    QCD_CHECK(QivenContext::write_to_cognition(
                   writer, lessonTx(writer->revision), *g1b)
                   .outcome == Verdict::Outcome::Applied);
 
     // stale base → StaleBase: durable divergence, re-read before writing
-    const auto stale = QivenContext::WriteToCognition(
+    const auto stale = QivenContext::write_to_cognition(
         c2, lessonTx(RevisionId { "rev-doesnotexist" }), *g1b);
     QCD_CHECK(stale.reason == RefusalReason::StaleBase);
-    QCD_CHECK(QivenContext::RecoveryFor(*keyedApply.successor->state, RefusalReason::StaleBase) == RecoveryAction::RereadRethink);
+    QCD_CHECK(QivenContext::recovery_for(*keyedApply.successor->state, RefusalReason::StaleBase) == RecoveryAction::RereadRethink);
 
     // empty transaction = ordinary turn: applied, nothing stored
-    const auto writer2 = QivenContext::CreateCognition(bootFromHead()); // fresh at the head
+    const auto writer2 = QivenContext::create_cognition(bootFromHead()); // fresh at the head
     ContextTransaction ordinary;
     ordinary.base = writer2->revision;
-    QCD_CHECK(QivenContext::WriteToCognition(writer2, ordinary, *g1b).outcome == Verdict::Outcome::Applied);
-    QivenContext::ReleaseGrant(*g1b);
+    QCD_CHECK(QivenContext::write_to_cognition(writer2, ordinary, *g1b).outcome == Verdict::Outcome::Applied);
+    QivenContext::release_grant(*g1b);
 
     // --- Work-cycle level: AUTHORITY-BOUND H2 (review §5) ----------------------
 
     Human human { "Jason", {}, "github:JasonHuang3D" };
     auto llm              = std::make_shared<LLM>();
     llm->name             = "GLM-5.3-Flash";
-    llm->pCognition       = QivenContext::CreateCognition(bootFromHead());
+    llm->pCognition       = QivenContext::create_cognition(bootFromHead());
     auto device           = std::make_shared<Device>();
     device->name          = "JasonPC";
     auto client           = std::make_shared<LLMClientTool>();
@@ -313,7 +313,7 @@ int main()
         evidence.reviewRef       = "PR-record review";
         std::vector<Operation> reviewed;
         reviewed.push_back(Operation { .kind = Operation::Kind::AppendDecision, .recordId = 38, .title = "ADR-0037", .payload = "a DIFFERENT payload" });
-        evidence.reviewedDeltaDigest = DigestOperations(reviewed);
+        evidence.reviewedDeltaDigest = digest_operations(reviewed);
         transaction.h2               = evidence;
         return transaction;
     };
@@ -333,7 +333,7 @@ int main()
         evidence.reviewer            = "github:SomeoneElse";
         evidence.reviewerBinding     = "someone-else";
         evidence.reviewRef           = "PR-record review";
-        evidence.reviewedDeltaDigest = DigestOperations(transaction.operations);
+        evidence.reviewedDeltaDigest = digest_operations(transaction.operations);
         transaction.h2               = evidence;
         return transaction;
     };
@@ -352,7 +352,7 @@ int main()
         evidence.reviewer            = "github:JasonHuang3D";
         evidence.reviewerBinding     = "GLM-5.3-Flash"; // the AUTHOR's binding
         evidence.reviewRef           = "PR-record review";
-        evidence.reviewedDeltaDigest = DigestOperations(transaction.operations);
+        evidence.reviewedDeltaDigest = digest_operations(transaction.operations);
         transaction.h2               = evidence;
         return transaction;
     };
@@ -370,7 +370,7 @@ int main()
         H2Evidence evidence;
         evidence.reviewer            = "github:JasonHuang3D";
         evidence.reviewerBinding     = "jason-brother-glm5-3";
-        evidence.reviewedDeltaDigest = DigestOperations(transaction.operations);
+        evidence.reviewedDeltaDigest = digest_operations(transaction.operations);
         transaction.h2               = evidence; // reviewRef EMPTY
         return transaction;
     };
@@ -387,20 +387,20 @@ int main()
     QCD_CHECK(llm->checkpoint.nextAction.find("design review") != std::string::npos);
 
     // pit.unattended_mutation_refused (P-08)
-    const auto ug = QivenContext::AcquireGrant(actor, WorkMode::Unattended);
+    const auto ug = QivenContext::acquire_grant(actor, WorkMode::Unattended);
     QCD_CHECK(ug.has_value());
-    const auto current = QivenContext::CreateCognition(bootFromHead());
-    QCD_CHECK(QivenContext::WriteToCognition(current, lessonTx(current->revision), *ug).reason == RefusalReason::UnattendedMutation);
-    QivenContext::ReleaseGrant(*ug);
+    const auto current = QivenContext::create_cognition(bootFromHead());
+    QCD_CHECK(QivenContext::write_to_cognition(current, lessonTx(current->revision), *ug).reason == RefusalReason::UnattendedMutation);
+    QivenContext::release_grant(*ug);
 
     // --- Phase 2: conflicts, lifecycle, evidence (DR-006, P-14/P-36/P-37) -----
     // With immutable materializations, every direct write needs a CURRENT
     // handle: the fresh() helper re-materializes at the head, and reads always
     // go through a fresh handle too (a pinned handle keeps its pinned world).
 
-    const auto g2 = QivenContext::AcquireGrant(actor, WorkMode::SupervisedForeground);
+    const auto g2 = QivenContext::acquire_grant(actor, WorkMode::SupervisedForeground);
     QCD_CHECK(g2.has_value());
-    const auto fresh = [&] { return QivenContext::CreateCognition(bootFromHead()); };
+    const auto fresh = [&] { return QivenContext::create_cognition(bootFromHead()); };
 
     // pit.open_conflict_blocks_acceptance: an OPEN global conflict blocks a
     // merge-class acceptance even when its H2 evidence is valid
@@ -412,14 +412,14 @@ int main()
                                                       .scope   = "",
                                                       .title   = "state-wording",
                                                       .payload = "producer invocation wording disagrees" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, openConflict, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, openConflict, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         const auto w = fresh();
         ContextTransaction blockedDecision =
             decisionTx(w->revision, 50, true, "blocked by conflict");
-        QCD_CHECK(QivenContext::WriteToCognition(w, blockedDecision, *g2).reason == RefusalReason::ConflictUnresolved);
-        QCD_CHECK(QivenContext::RecoveryFor(*w->state, RefusalReason::ConflictUnresolved) == RecoveryAction::FailClosed);
+        QCD_CHECK(QivenContext::write_to_cognition(w, blockedDecision, *g2).reason == RefusalReason::ConflictUnresolved);
+        QCD_CHECK(QivenContext::recovery_for(*w->state, RefusalReason::ConflictUnresolved) == RecoveryAction::FailClosed);
         ContextTransaction unrelatedMemory;
         unrelatedMemory.base = w->revision;
         unrelatedMemory.operations.push_back(Operation { .kind          = Operation::Kind::AddMemory,
@@ -427,7 +427,7 @@ int main()
                                                          .title         = "unrelated",
                                                          .payload       = "global conflicts still block",
                                                          .provenanceRef = "v3-phase2c-session" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, unrelatedMemory, *g2).reason == RefusalReason::ConflictUnresolved);
+        QCD_CHECK(QivenContext::write_to_cognition(w, unrelatedMemory, *g2).reason == RefusalReason::ConflictUnresolved);
     }
     {
         const auto w = fresh();
@@ -436,32 +436,32 @@ int main()
         resolveNoText.operations.push_back(Operation { .kind  = Operation::Kind::ResolveConflict,
                                                        .scope = "",
                                                        .title = "state-wording" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, resolveNoText, *g2).reason == RefusalReason::InvariantFailed);
+        QCD_CHECK(QivenContext::write_to_cognition(w, resolveNoText, *g2).reason == RefusalReason::InvariantFailed);
         ContextTransaction resolve;
         resolve.base = w->revision;
         resolve.operations.push_back(Operation { .kind    = Operation::Kind::ResolveConflict,
                                                  .scope   = "",
                                                  .title   = "state-wording",
                                                  .payload = "human view with --verbose is canonical" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, resolve, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, resolve, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         // the proposer re-proposes at the new revision: same reviewed delta
         const auto w                 = fresh();
         ContextTransaction unblocked = decisionTx(w->revision, 50, true, "blocked by conflict");
-        QCD_CHECK(QivenContext::WriteToCognition(w, unblocked, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, unblocked, *g2).outcome == Verdict::Outcome::Applied);
     }
 
     // pit.history_append_only + reciprocal acyclic supersession
     {
         const auto w                = fresh();
         ContextTransaction accept60 = decisionTx(w->revision, 60, true, "first decision");
-        QCD_CHECK(QivenContext::WriteToCognition(w, accept60, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, accept60, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         const auto w                = fresh();
         ContextTransaction accept61 = decisionTx(w->revision, 61, true, "successor decision");
-        QCD_CHECK(QivenContext::WriteToCognition(w, accept61, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, accept61, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         const auto w = fresh();
@@ -472,9 +472,9 @@ int main()
                                                    .recordId          = 60,
                                                    .successorRecordId = 61,
                                                    .payload           = "replaced by the successor" });
-        supersede.h2 = H2Evidence { DigestOperations(supersede.operations),
+        supersede.h2 = H2Evidence { digest_operations(supersede.operations),
                                     "github:JasonHuang3D", "jason-brother-glm5-3", "PR-record review" };
-        QCD_CHECK(QivenContext::WriteToCognition(w, supersede, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, supersede, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         const auto w         = fresh();
@@ -498,9 +498,9 @@ int main()
                                                        .recordId          = 61,
                                                        .successorRecordId = 61,
                                                        .payload           = "self" });
-        selfSupersede.h2 = H2Evidence { DigestOperations(selfSupersede.operations),
+        selfSupersede.h2 = H2Evidence { digest_operations(selfSupersede.operations),
                                         "github:JasonHuang3D", "jason-brother-glm5-3", "PR-record review" };
-        QCD_CHECK(QivenContext::WriteToCognition(w, selfSupersede, *g2).reason == RefusalReason::InvariantFailed);
+        QCD_CHECK(QivenContext::write_to_cognition(w, selfSupersede, *g2).reason == RefusalReason::InvariantFailed);
     }
     {
         const auto w = fresh();
@@ -509,7 +509,7 @@ int main()
         noProvenance.operations.push_back(Operation { .kind    = Operation::Kind::AddMemory,
                                                       .title   = "orphan",
                                                       .payload = "no provenance" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, noProvenance, *g2).reason == RefusalReason::InvariantFailed);
+        QCD_CHECK(QivenContext::write_to_cognition(w, noProvenance, *g2).reason == RefusalReason::InvariantFailed);
     }
     {
         // negative knowledge is a SEMANTIC floor: rejected alternatives surface
@@ -522,7 +522,7 @@ int main()
                                                   .title         = "rejected alternative",
                                                   .payload       = "event-sourcing was rejected: state-replication only",
                                                   .provenanceRef = "ADR-0033-alternatives" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, negative, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, negative, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         const auto w = fresh();
@@ -532,7 +532,7 @@ int main()
                                                      .scope   = "",
                                                      .title   = "snap-ae811bad8dada212",
                                                      .payload = "genesis golden vector pinned" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, addEvidence, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, addEvidence, *g2).outcome == Verdict::Outcome::Applied);
     }
     QCD_CHECK(!fresh()->state->evidence.empty());
 
@@ -546,7 +546,7 @@ int main()
         upsertBoundary.operations.push_back(Operation { .kind     = Operation::Kind::UpsertObligation,
                                                         .recordId = 9,
                                                         .payload  = "the next boundary obligation" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, upsertBoundary, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, upsertBoundary, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         const auto w = fresh();
@@ -554,7 +554,7 @@ int main()
         setBoundary.base = w->revision;
         setBoundary.operations.push_back(
             Operation { .kind = Operation::Kind::SetNextBoundary, .recordId = 9 });
-        QCD_CHECK(QivenContext::WriteToCognition(w, setBoundary, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, setBoundary, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         const auto w = fresh();
@@ -562,7 +562,7 @@ int main()
         dangling.base = w->revision;
         dangling.operations.push_back(
             Operation { .kind = Operation::Kind::CloseObligation, .recordId = 9 });
-        QCD_CHECK(QivenContext::WriteToCognition(w, dangling, *g2).reason == RefusalReason::InvariantFailed); // dangling boundary reference
+        QCD_CHECK(QivenContext::write_to_cognition(w, dangling, *g2).reason == RefusalReason::InvariantFailed); // dangling boundary reference
     }
 
     // pit.view_refs_resolve / pit.view_never_invented (DR-008, P-40/P-41):
@@ -579,7 +579,7 @@ int main()
                                                        .scope   = "workflow",
                                                        .title   = "views/workflows/local-supervised-agent",
                                                        .payload = "supervised local agent workflow profile" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, upsertProfile, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, upsertProfile, *g2).outcome == Verdict::Outcome::Applied);
     }
     {
         const auto w = fresh();
@@ -590,7 +590,7 @@ int main()
                                                  .title         = "zcode-jason",
                                                  .payload       = "supervised local agent adaptation",
                                                  .provenanceRef = "views/environments/jasonpc,views/does/not-exist" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, badView, *g2).reason == RefusalReason::InvariantFailed); // dangling profile ref (review §7)
+        QCD_CHECK(QivenContext::write_to_cognition(w, badView, *g2).reason == RefusalReason::InvariantFailed); // dangling profile ref (review §7)
     }
     {
         const auto w = fresh();
@@ -601,7 +601,7 @@ int main()
                                                   .title         = "zcode-jason",
                                                   .payload       = "supervised local agent adaptation",
                                                   .provenanceRef = "views/environments/jasonpc,views/workflows/local-supervised-agent" });
-        QCD_CHECK(QivenContext::WriteToCognition(w, goodView, *g2).outcome == Verdict::Outcome::Applied);
+        QCD_CHECK(QivenContext::write_to_cognition(w, goodView, *g2).outcome == Verdict::Outcome::Applied);
     }
     ResolveDiagnostic diagnostic;
     {
@@ -665,27 +665,27 @@ int main()
         }
         QCD_CHECK(!QivenContext::RenderBundle(starved, OutputView::Human).empty());
     }
-    QivenContext::ReleaseGrant(*g2);
+    QivenContext::release_grant(*g2);
 
     // pit.restored_never_self_promotes: artifact restore quarantines —
     // cognition without write authority, store untouched
     const auto c5        = fresh();
-    const Bytes artifact = QivenContext::ReadFromCognition(c5, Query {});
+    const Bytes artifact = QivenContext::read_from_cognition(c5, Query {});
     CognitionSource artifactSource;
     artifactSource.kind           = CognitionSourceKind::HandoffArtifact;
     artifactSource.inlineBytes    = artifact;
-    artifactSource.expectedDigest = DraftContentId(artifact);
-    const auto restored           = QivenContext::CreateCognition(artifactSource);
+    artifactSource.expectedDigest = draft_content_id(artifact);
+    const auto restored           = QivenContext::create_cognition(artifactSource);
     QCD_CHECK(restored != nullptr);
     QCD_CHECK(restored->quarantine == QuarantineState::Isolated);
     QCD_CHECK(restored->digest == c5->digest); // same content, same integrity identity
     QCD_CHECK(IsEmpty(restored->revision));    // a quarantined artifact has no storage identity
-    const auto rg = QivenContext::AcquireGrant(actor, WorkMode::SupervisedForeground);
+    const auto rg = QivenContext::acquire_grant(actor, WorkMode::SupervisedForeground);
     QCD_CHECK(rg.has_value());
     ContextTransaction quarantinedWrite = lessonTx(restored->revision);
-    QCD_CHECK(QivenContext::WriteToCognition(restored, quarantinedWrite, *rg).reason == RefusalReason::GovernanceDenied);
+    QCD_CHECK(QivenContext::write_to_cognition(restored, quarantinedWrite, *rg).reason == RefusalReason::GovernanceDenied);
     QCD_CHECK(store->head() == c5->revision); // the store was never touched
-    QivenContext::ReleaseGrant(*rg);
+    QivenContext::release_grant(*rg);
 
     // pit.corrupt_artifact_fails_closed (P-23)
     DeserializeError error;
@@ -694,8 +694,8 @@ int main()
     CognitionSource corruptedSource;
     corruptedSource.kind           = CognitionSourceKind::HandoffArtifact;
     corruptedSource.inlineBytes    = corrupted;
-    corruptedSource.expectedDigest = DraftContentId(artifact);
-    QCD_CHECK(QivenContext::CreateCognition(corruptedSource, &error) == nullptr);
+    corruptedSource.expectedDigest = draft_content_id(artifact);
+    QCD_CHECK(QivenContext::create_cognition(corruptedSource, &error) == nullptr);
     QCD_CHECK(error.kind == DeserializeError::Kind::DigestMismatch);
 
     // pit.resource_abuse_fails_closed (DR-009): bounded reserves, typed error
@@ -713,16 +713,16 @@ int main()
     CognitionSource abusiveSource;
     abusiveSource.kind           = CognitionSourceKind::HandoffArtifact;
     abusiveSource.inlineBytes    = abusive;
-    abusiveSource.expectedDigest = DraftContentId(abusive);
-    QCD_CHECK(QivenContext::CreateCognition(abusiveSource, &error) == nullptr);
+    abusiveSource.expectedDigest = draft_content_id(abusive);
+    QCD_CHECK(QivenContext::create_cognition(abusiveSource, &error) == nullptr);
     QCD_CHECK(error.kind == DeserializeError::Kind::ResourceAbuse);
 
     // retire: lifetime split — the service drops ownership; pinned handles
     // stay alive but fenced (v1's conflation, split in v2, typed in v3)
     const auto retired = fresh();
-    QCD_CHECK(QivenContext::RetireCognition(retired));
-    QCD_CHECK(!QivenContext::RetireCognition(retired)); // already retired
-    QCD_CHECK(!retired->state->memory.empty());         // pinned object alive
+    QCD_CHECK(QivenContext::retire_cognition(retired));
+    QCD_CHECK(!QivenContext::retire_cognition(retired)); // already retired
+    QCD_CHECK(!retired->state->memory.empty());          // pinned object alive
 
     // --- Phase 3: session economics, process types, quarantine machine --------
 
@@ -735,31 +735,31 @@ int main()
     QCD_CHECK(llm->turnBudget.soft == std::chrono::seconds(26 * 60)); // the observed boundary
 
     // the quarantine state machine is FAIL-CLOSED (review §10, S10-R2):
-    // VerifyRestored moves Isolated -> Verified (root principal only);
-    // PromoteAuthority refuses everything but AuthorityPending — checksum
+    // verify_restored moves Isolated -> Verified (root principal only);
+    // promote_authority refuses everything but AuthorityPending — checksum
     // success, import or uptime never promote; AuthorityPending is only
     // reachable via a canonical cutover ADR (out of draft scope by design)
-    const Bytes artifact2 = QivenContext::ReadFromCognition(fresh(), Query {});
+    const Bytes artifact2 = QivenContext::read_from_cognition(fresh(), Query {});
     CognitionSource artifactSource2;
     artifactSource2.kind           = CognitionSourceKind::HandoffArtifact;
     artifactSource2.inlineBytes    = artifact2;
-    artifactSource2.expectedDigest = DraftContentId(artifact2);
-    const auto isolated            = QivenContext::CreateCognition(artifactSource2);
+    artifactSource2.expectedDigest = draft_content_id(artifact2);
+    const auto isolated            = QivenContext::create_cognition(artifactSource2);
     QCD_CHECK(isolated != nullptr && isolated->quarantine == QuarantineState::Isolated);
     const AuthenticatedActor rootActor { "github:JasonHuang3D", Role::Owner, "owner-session",
                                          "root-principal", "n/a" };
-    QCD_CHECK(QivenContext::PromoteAuthority(isolated, rootActor) == nullptr); // not AuthorityPending
-    const auto verified = QivenContext::VerifyRestored(isolated, rootActor);
+    QCD_CHECK(QivenContext::promote_authority(isolated, rootActor) == nullptr); // not AuthorityPending
+    const auto verified = QivenContext::verify_restored(isolated, rootActor);
     QCD_CHECK(verified != nullptr && verified->quarantine == QuarantineState::Verified);
-    QCD_CHECK(verified->digest == isolated->digest);                           // same content, new quarantine state
-    QCD_CHECK(QivenContext::PromoteAuthority(verified, rootActor) == nullptr); // still fail-closed
-    QCD_CHECK(QivenContext::VerifyRestored(isolated, stranger()) == nullptr);  // stranger refused
+    QCD_CHECK(verified->digest == isolated->digest);                            // same content, new quarantine state
+    QCD_CHECK(QivenContext::promote_authority(verified, rootActor) == nullptr); // still fail-closed
+    QCD_CHECK(QivenContext::verify_restored(isolated, stranger()) == nullptr);  // stranger refused
 
     // --- review §9/§10 + S7-R3: the RUNTIME REBIRTH test -----------------------
     // Generation A ran above: Human/LLM/Client/Device were created, used, and
     // will now be DESTROYED. Only durable cognition (the store) survives.
     {
-        const auto headCognition          = QivenContext::CreateCognition(bootFromHead());
+        const auto headCognition          = QivenContext::create_cognition(bootFromHead());
         const std::size_t decisionsBefore = headCognition->state->decisions.size();
         static_cast<void>(decisionsBefore);
 
@@ -782,11 +782,11 @@ int main()
         llmB->name       = "GLM-5.3-Flash";
         llmB->pCognition = headCognition;
         auto deviceB     = std::make_shared<Device>();
-        QCD_CHECK(!QivenContext::IsContinueable(
+        QCD_CHECK(!QivenContext::is_continueable(
             humanA.get(), clientA.get(), deviceB.get(), llmA.get(), headCognition));
-        QCD_CHECK(!QivenContext::IsContinueable(
+        QCD_CHECK(!QivenContext::is_continueable(
             humanA.get(), clientA.get(), deviceA.get(), llmB.get(), headCognition));
-        QCD_CHECK(QivenContext::IsContinueable(
+        QCD_CHECK(QivenContext::is_continueable(
             humanA.get(), clientA.get(), deviceA.get(), llmA.get(), headCognition));
 
         // disclosure consistency (review §10): the actor names the ACTUAL
@@ -805,7 +805,7 @@ int main()
     } // every Generation-A participant is DESTROYED here; the store survives
 
     // Generation B: entirely fresh participants, same durable cognition
-    const auto headB          = QivenContext::CreateCognition(bootFromHead());
+    const auto headB          = QivenContext::create_cognition(bootFromHead());
     auto humanB               = std::make_shared<Human>();
     humanB->name              = "Jason";
     humanB->verifiedPrincipal = "github:JasonHuang3D";

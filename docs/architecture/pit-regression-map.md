@@ -81,6 +81,8 @@ Failure classes: `AUTH` authority/identity · `EVID` evidence/acceptance ·
 | P-47 | `IsContinueable` checked node health, not graph EDGES: mismatched client/llm/device bindings passed | 2026-09-20 review §9 | AUTH | edge validation: client→llm, client→device, llm→handle, binding-modelId == llm name | runtime rebirth test (generation B + mismatched-graph refusals) | v3-2C |
 | P-48 | `Human::UseLLMToWork` hardcoded the serving model: a runtime rebind could drift the ADR-0035 disclosure while cognition stayed silent | 2026-09-20 review §10 | AUTH | disclosure derived from the ACTUALLY bound LLM (`pClient->pCurrentLLM->name`); `IsContinueable` validates binding↔LLM consistency | runtime rebirth test | v3-2C |
 
+| P-50 | Publication swept unaccepted preserved commits onto main: the pointer commit sat on top of unpushed local main, and the merge published the whole stack | 2026-09-20 host publication incident (nine-repository audit finding 1) | PROC | pre-publication rule: `git log base..branch` MUST be reviewed and match the H2'd delta exactly | morning-review checklist + audit record | v3-2C |
+
 ## Explicitly judgment-only (no test will exist)
 
 Recorded here so their absence from the suite is a decision, not an oversight:
