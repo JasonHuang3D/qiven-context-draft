@@ -215,6 +215,8 @@ struct Operation
         AddEvidence,          // EvidenceWrite
         OpenConflict,         // ConflictWrite
         ResolveConflict,      // ConflictWrite
+        AmendViewSpec,        // EvidenceWrite-class: durable view adaptation
+        SetNextBoundary,      // StateUpdate: bind nextBoundaryRef to an open obligation
     };
     Kind kind { Kind::AddMemory };
     std::int64_t recordId { 0 };          // decision/obligation/conflict id, per kind
@@ -289,6 +291,64 @@ struct Query
 
 using Data = Bytes; // full materialized snapshot for thinking (ADR-0033)
 
+// --- the read plane: view resolution and the ContextBundle (DR-007/DR-008) ----
+
+enum class OutputView
+{
+    Human,   // staged, operator-legible rendering
+    Machine, // deterministic flat rendering for automation; both views of ONE result
+};
+
+struct ResolveDiagnostic
+{
+    enum class Kind
+    {
+        None,        // resolved
+        NotFound,    // unknown view id: fall back to the identity-independent context,
+                     // never invent a participant combination (pit P-41)
+        InvalidRefs, // empty or duplicated profile refs fail compilation (pit P-40)
+    };
+    Kind kind { Kind::None };
+};
+
+// --- the ContextBundle: floors and constraints are non-negotiable, the budget
+// shrinks candidates only (DR-007); a bundle is evidence, never permission ----
+
+struct BundleCandidate
+{
+    std::string kind; // "decision" / "memory" / "obligation" — epistemic type preserved
+    std::string id;
+    std::string summary;
+};
+
+struct ObligationEvaluation
+{
+    std::int64_t id;
+    enum class Evaluation
+    {
+        Met,
+        Unknown,
+        Unmet,
+    };
+    Evaluation evaluation { Evaluation::Unknown };
+};
+
+struct BundleOmission
+{
+    std::string what;
+    std::string reason;
+};
+
+struct ContextBundle
+{
+    ContentId snapshot;                            // one snapshot; never mixed
+    std::vector<std::string> mandatoryInputs;      // the S1-R3 floors
+    std::vector<std::string> protectedConstraints; // verbatim; never elided
+    std::vector<BundleCandidate> candidates;       // typed candidates, never truth
+    std::vector<ObligationEvaluation> obligations; // three-valued (ADR-0033 §6)
+    std::vector<BundleOmission> omissions;         // what was left out and why
+};
+
 // --- the service (single-writer gate + registry) ------------------------------
 
 class QivenContext
@@ -341,6 +401,22 @@ public:
     // the recovery rule for a refusal, read from cognition (DR-002); missing
     // rows fall back to FailClosed
     [[nodiscard]] static RecoveryAction RecoveryFor(const Snapshot& snapshot, RefusalReason reason);
+
+    // view resolution: a pure read-time transformation. Unknown ids fall back
+    // to the identity-independent context (nullopt + NotFound) — a participant
+    // combination is never invented (S1-R2); invalid refs fail compilation
+    // (InvalidRefs).
+    [[nodiscard]] static std::optional<ViewSpec> ResolveView(const CognitionHandle& handle,
+                                                             const std::string& viewId,
+                                                             ResolveDiagnostic* diag = nullptr);
+
+    // the bundle: floors and protected constraints survive any budget; the
+    // budget shrinks candidates only, with omissions explained
+    [[nodiscard]] static ContextBundle BuildBundle(const CognitionHandle& handle,
+                                                   const Query& query);
+
+    // two renderings of one result; neither audience scrapes the other
+    [[nodiscard]] static std::string RenderBundle(const ContextBundle& bundle, OutputView view);
 
     // drop the service's owning reference; pinned handles stay alive but fenced
     // (lifetime = shared_ptr; authority = the active grant — the v1 conflation,

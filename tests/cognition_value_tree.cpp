@@ -50,7 +50,11 @@ int main()
     snapshot.policy.handoff           = { HandoffPolicy { OperationClass::DecisionAcceptance, true, false } };
     snapshot.policy.recovery          = { RecoveryRule { RefusalReason::StaleBase,
                                                 RecoveryAction::RereadRethink } };
-    snapshot.state                    = State { "active-work", "current", "repositories", "roadmap" };
+    snapshot.state.objective          = "qiven-context continuity and kernel design";
+    snapshot.state.current            = "current";
+    snapshot.state.candidateRef       = "not-created";
+    snapshot.state.repositories       = "repositories";
+    snapshot.state.roadmap            = "roadmap";
     snapshot.decisions.push_back(Decision { 36,
                                             Lifecycle::Accepted,
                                             "ADR-0036",
@@ -87,7 +91,7 @@ int main()
                 restored->state->constitution.articles.size(), restored->state->policy.handoff.size(),
                 restored->state->policy.recovery.size(), restored->state->decisions.size(),
                 restored->state->memory.size(), restored->state->obligations.size(),
-                restored->state->evidence.size(), restored->state->state.activeWork.size(),
+                restored->state->evidence.size(), restored->state->state.objective.size(),
                 restored->state->state.current.size(), restored->state->state.repositories.size(),
                 restored->state->state.roadmap.size());
 
