@@ -115,7 +115,7 @@ int main()
 
     // golden vector: pins the v2 genesis serialization format
     std::printf("genesis content id: %s\n", c1->contentId.c_str());
-    QCD_CHECK(c1->contentId == "draft-92f97647488b7c58"); // v3: conflicts + full policy table
+    QCD_CHECK(c1->contentId == "draft-5907019067b01075"); // v4: typed state + views
 
     // pit.port_never_reenters_service (P-42): the port is invoked with the
     // governance snapshot supplied by the service — never re-enters
@@ -445,6 +445,76 @@ int main()
     QCD_CHECK(!c3->state->evidence.empty());
     QivenContext::ReleaseGrant(*g2);
 
+    // --- Phase 2b: state coherence, views, bundles (DR-007/DR-008, P-15/P-40) --
+
+    const auto g3 = QivenContext::AcquireGrant(actor, WorkMode::SupervisedForeground);
+    QCD_CHECK(g3.has_value());
+
+    // pit.state_references_resolve (P-15): the next boundary binds to OPEN work
+    ContextTransaction upsertBoundary;
+    upsertBoundary.base = c3->contentId;
+    upsertBoundary.operations.push_back(Operation { .kind     = Operation::Kind::UpsertObligation,
+                                                    .recordId = 9,
+                                                    .payload  = "the next boundary obligation" });
+    QCD_CHECK(QivenContext::WriteToCognition(c3, upsertBoundary, *g3).outcome == Verdict::Outcome::Applied);
+    ContextTransaction setBoundary;
+    setBoundary.base = c3->contentId;
+    setBoundary.operations.push_back(
+        Operation { .kind = Operation::Kind::SetNextBoundary, .recordId = 9 });
+    QCD_CHECK(QivenContext::WriteToCognition(c3, setBoundary, *g3).outcome == Verdict::Outcome::Applied);
+    // closing obligation 9 would dangle the boundary reference → refused
+    ContextTransaction dangling;
+    dangling.base = c3->contentId;
+    dangling.operations.push_back(
+        Operation { .kind = Operation::Kind::CloseObligation, .recordId = 9 });
+    QCD_CHECK(QivenContext::WriteToCognition(c3, dangling, *g3).reason == RefusalReason::InvariantFailed);
+
+    // pit.view_refs_resolve / pit.view_never_invented (DR-008, P-40/P-41)
+    ContextTransaction badView;
+    badView.base = c3->contentId;
+    badView.operations.push_back(Operation { .kind          = Operation::Kind::AmendViewSpec,
+                                             .scope         = "ZCode:Jason",
+                                             .title         = "zcode-jason",
+                                             .payload       = "supervised local agent adaptation",
+                                             .provenanceRef = "views/environments/jasonpc,views/environments/jasonpc" });
+    QCD_CHECK(QivenContext::WriteToCognition(c3, badView, *g3).reason == RefusalReason::InvariantFailed); // duplicated profile ref
+    ContextTransaction goodView;
+    goodView.base = c3->contentId;
+    goodView.operations.push_back(Operation { .kind          = Operation::Kind::AmendViewSpec,
+                                              .scope         = "ZCode:Jason",
+                                              .title         = "zcode-jason",
+                                              .payload       = "supervised local agent adaptation",
+                                              .provenanceRef = "views/environments/jasonpc,views/workflows/local-supervised-agent" });
+    QCD_CHECK(QivenContext::WriteToCognition(c3, goodView, *g3).outcome == Verdict::Outcome::Applied);
+    ResolveDiagnostic diagnostic;
+    const auto resolvedView = QivenContext::ResolveView(c3, "zcode-jason", &diagnostic);
+    QCD_CHECK(resolvedView.has_value() && diagnostic.kind == ResolveDiagnostic::Kind::None);
+    QCD_CHECK(resolvedView->human == "Jason");
+    QCD_CHECK(!QivenContext::ResolveView(c3, "chatgpt-jason", &diagnostic).has_value());
+    QCD_CHECK(diagnostic.kind == ResolveDiagnostic::Kind::NotFound); // never invented
+
+    // pit.bundle_floor_survives_budget (P-20): floors survive, candidates shrink
+    const auto starved = QivenContext::BuildBundle(c3, Query { "task", 1 });
+    QCD_CHECK(!starved.mandatoryInputs.empty()); // floors intact under any budget
+    QCD_CHECK(!starved.protectedConstraints.empty());
+    QCD_CHECK(starved.candidates.size() == 1); // shrunk to the budget
+    QCD_CHECK(!starved.omissions.empty());     // the shrink is EXPLAINED
+    const auto rich = QivenContext::BuildBundle(c3, Query { "task", 0 });
+    QCD_CHECK(rich.candidates.size() > starved.candidates.size());
+    QCD_CHECK(rich.mandatoryInputs.size() == starved.mandatoryInputs.size());
+
+    // pit.candidate_not_truth: candidates are typed evidence; a bundle never
+    // grants authorization; the machine render is deterministic
+    const auto rendered = QivenContext::RenderBundle(starved, OutputView::Machine);
+    QCD_CHECK(rendered.find("authorization: not_granted") != std::string::npos);
+    QCD_CHECK(rendered == QivenContext::RenderBundle(starved, OutputView::Machine));
+    for (const auto& candidate : starved.candidates)
+    {
+        QCD_CHECK(candidate.kind == "decision" || candidate.kind == "memory");
+    }
+    QCD_CHECK(!QivenContext::RenderBundle(starved, OutputView::Human).empty());
+    QivenContext::ReleaseGrant(*g3);
+
     // pit.restored_never_self_promotes: artifact restore quarantines —
     // cognition without write authority, store untouched
     const Bytes artifact = QivenContext::ReadFromCognition(c3, Query {});
@@ -478,7 +548,7 @@ int main()
     // rejected before allocation, with a typed error — in Debug AND Release.
     // Layout: version, empty root principal, then a huge article count.
     Bytes abusive;
-    abusive.push_back(std::byte { 3 }); // serialization version
+    abusive.push_back(std::byte { 4 }); // serialization version
     for (unsigned i = 0; i < 4; ++i)
     {
         abusive.push_back(std::byte { 0 }); // empty root principal string

@@ -9,8 +9,10 @@
 
 #include <qiven/contracts.hpp>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -18,7 +20,7 @@ namespace qiven::context
 {
 namespace
 {
-constexpr std::uint8_t kSerializationVersion = 3;
+constexpr std::uint8_t kSerializationVersion = 4;
 constexpr std::uint32_t kMaxRecords          = 100000; // resource-abuse guard (DR-009)
 
 // --- little-endian TLV writers (fixed field order, versioned) ----------------
@@ -220,8 +222,11 @@ Bytes serializeImpl(const Snapshot& snapshot)
         putU8(bytes, static_cast<std::uint8_t>(row.action));
     }
 
-    putStr(bytes, snapshot.state.activeWork);
+    putStr(bytes, snapshot.state.objective);
     putStr(bytes, snapshot.state.current);
+    putStr(bytes, snapshot.state.checkpointRef);
+    putStr(bytes, snapshot.state.candidateRef);
+    putStr(bytes, snapshot.state.nextBoundaryRef);
     putStr(bytes, snapshot.state.repositories);
     putStr(bytes, snapshot.state.roadmap);
 
@@ -290,6 +295,20 @@ Bytes serializeImpl(const Snapshot& snapshot)
         putStr(bytes, conflict.resolution);
     }
 
+    putU32(bytes, static_cast<std::uint32_t>(snapshot.views.size()));
+    for (const auto& view : snapshot.views)
+    {
+        putStr(bytes, view.id);
+        putStr(bytes, view.agent);
+        putStr(bytes, view.human);
+        putStr(bytes, view.summary);
+        putU32(bytes, static_cast<std::uint32_t>(view.profileRefs.size()));
+        for (const auto& ref : view.profileRefs)
+        {
+            putStr(bytes, ref);
+        }
+    }
+
     return bytes;
 }
 
@@ -332,10 +351,13 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
 
         if (reader.ok())
         {
-            snapshot.state.activeWork   = reader.str("state.activeWork");
-            snapshot.state.current      = reader.str("state.current");
-            snapshot.state.repositories = reader.str("state.repositories");
-            snapshot.state.roadmap      = reader.str("state.roadmap");
+            snapshot.state.objective       = reader.str("state.objective");
+            snapshot.state.current         = reader.str("state.current");
+            snapshot.state.checkpointRef   = reader.str("state.checkpointRef");
+            snapshot.state.candidateRef    = reader.str("state.candidateRef");
+            snapshot.state.nextBoundaryRef = reader.str("state.nextBoundaryRef");
+            snapshot.state.repositories    = reader.str("state.repositories");
+            snapshot.state.roadmap         = reader.str("state.roadmap");
         }
     }
 
@@ -453,6 +475,25 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
         }
     }
 
+    if (reader.ok())
+    {
+        const auto viewCount = reader.cappedCount("view count");
+        snapshot.views.reserve(viewCount);
+        for (std::uint32_t i = 0; reader.ok() && i < viewCount; ++i)
+        {
+            ViewSpec view;
+            view.id          = reader.str("view id");
+            view.agent       = reader.str("view agent");
+            view.human       = reader.str("view human");
+            view.summary     = reader.str("view summary");
+            view.profileRefs = reader.stringVector("view profile refs");
+            if (reader.ok())
+            {
+                snapshot.views.push_back(std::move(view));
+            }
+        }
+    }
+
     if (reader.ok() && reader.offset != bytes.size())
     {
         reader.error = DeserializeError { DeserializeError::Kind::Truncated, reader.offset,
@@ -531,6 +572,8 @@ Snapshot makeGenesis()
     genesis.governance.rootPrincipal = "github:JasonHuang3D";
     genesis.constitution             = makeConstitution();
     genesis.policy                   = makeDefaultPolicy();
+    genesis.state.objective          = "qiven-context continuity and kernel design";
+    genesis.state.candidateRef       = "not-created";
     return genesis;
 }
 
@@ -1124,6 +1167,58 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             }
             break;
         }
+        case Operation::Kind::AmendViewSpec:
+        {
+            // pit.view_refs_resolve: empty ids, empty refs or duplicated profile
+            // refs fail view compilation — refused at the gate, not at read time
+            if (operation.title.empty() || operation.scope.empty() || operation.scope.find(':') == std::string::npos)
+            {
+                return refuse(RefusalReason::InvariantFailed); // id and agent:human required
+            }
+            for (const auto& existing : current.views)
+            {
+                if (existing.id == operation.title && operation.aux == 0)
+                {
+                    return refuse(RefusalReason::InvariantFailed); // view ids never reused
+                }
+            }
+            std::vector<std::string> refs;
+            {
+                std::istringstream parsed { operation.provenanceRef };
+                std::string ref;
+                while (std::getline(parsed, ref, ','))
+                {
+                    if (!ref.empty())
+                    {
+                        refs.push_back(ref);
+                    }
+                }
+            }
+            if (refs.empty())
+            {
+                return refuse(RefusalReason::InvariantFailed); // a view without profiles is invention
+            }
+            for (std::size_t i = 0; i < refs.size(); ++i)
+            {
+                for (std::size_t k = i + 1; k < refs.size(); ++k)
+                {
+                    if (refs[i] == refs[k])
+                    {
+                        return refuse(RefusalReason::InvariantFailed); // duplicated ref
+                    }
+                }
+            }
+            break;
+        }
+        case Operation::Kind::SetNextBoundary:
+        {
+            const Obligation* boundary = findObligation(current, operation.recordId);
+            if (boundary == nullptr || boundary->status != Obligation::Status::Open)
+            {
+                return refuse(RefusalReason::InvariantFailed); // the boundary binds to OPEN work
+            }
+            break;
+        }
         }
     }
 
@@ -1214,6 +1309,52 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
                 }
             }
             break;
+        case Operation::Kind::AmendViewSpec:
+        {
+            if (operation.aux == 1)
+            { // retirement: the view is dropped by id (history stays in past snapshots)
+                std::erase_if(next.views, [&](const ViewSpec& view) { return view.id == operation.title; });
+                break;
+            }
+            ViewSpec view;
+            view.id      = operation.title;
+            view.agent   = operation.scope.substr(0, operation.scope.find(':'));
+            view.human   = operation.scope.substr(operation.scope.find(':') + 1);
+            view.summary = operation.payload;
+            std::istringstream refs { operation.provenanceRef };
+            std::string ref;
+            while (std::getline(refs, ref, ','))
+            {
+                if (!ref.empty())
+                {
+                    view.profileRefs.push_back(ref);
+                }
+            }
+            next.views.push_back(std::move(view));
+            break;
+        }
+        case Operation::Kind::SetNextBoundary:
+            next.state.nextBoundaryRef = std::to_string(operation.recordId);
+            break;
+        }
+    }
+
+    // gate 7.5: post-apply state coherence (pit P-15) — a nextBoundary that no
+    // longer resolves to OPEN work refuses the whole transaction
+    if (!next.state.nextBoundaryRef.empty())
+    {
+        bool boundaryResolved = false;
+        for (const auto& obligation : next.obligations)
+        {
+            if (std::to_string(obligation.id) == next.state.nextBoundaryRef && obligation.status == Obligation::Status::Open)
+            {
+                boundaryResolved = true;
+                break;
+            }
+        }
+        if (!boundaryResolved)
+        {
+            return refuse(RefusalReason::InvariantFailed); // dangling boundary reference
         }
     }
 
@@ -1265,6 +1406,182 @@ std::shared_ptr<const Snapshot> QivenContext::CanonicalHead()
 {
     std::lock_guard lock(g_admission);
     return CanonicalHeadLocked();
+}
+
+std::optional<ViewSpec> QivenContext::ResolveView(const CognitionHandle& handle,
+                                                  const std::string& viewId,
+                                                  ResolveDiagnostic* diag)
+{
+    QIVEN_ASSERT(handle != nullptr);
+    const auto reset = [&](ResolveDiagnostic::Kind kind) -> std::optional<ViewSpec> {
+        if (diag)
+        {
+            diag->kind = kind;
+        }
+        return std::nullopt;
+    };
+    for (const auto& view : handle->state->views)
+    {
+        if (view.id != viewId)
+        {
+            continue;
+        }
+        if (view.profileRefs.empty())
+        {
+            return reset(ResolveDiagnostic::Kind::InvalidRefs); // fails compilation (P-40)
+        }
+        for (std::size_t i = 0; i < view.profileRefs.size(); ++i)
+        {
+            if (view.profileRefs[i].empty())
+            {
+                return reset(ResolveDiagnostic::Kind::InvalidRefs);
+            }
+            for (std::size_t k = i + 1; k < view.profileRefs.size(); ++k)
+            {
+                if (view.profileRefs[k] == view.profileRefs[i])
+                {
+                    return reset(ResolveDiagnostic::Kind::InvalidRefs); // duplicate ref
+                }
+            }
+        }
+        if (diag)
+        {
+            diag->kind = ResolveDiagnostic::Kind::None;
+        }
+        return view; // resolved: the participant combination is REAL, never invented
+    }
+    return reset(ResolveDiagnostic::Kind::NotFound); // S1-R2: fall back, never invent
+}
+
+ContextBundle QivenContext::BuildBundle(const CognitionHandle& handle, const Query& query)
+{
+    QIVEN_ASSERT(handle != nullptr);
+    const Snapshot& snapshot = *handle->state;
+    ContextBundle bundle;
+    bundle.snapshot = handle->contentId;
+
+    // floors: mandatory inputs, present regardless of any budget (S1-R3, P-20)
+    bundle.mandatoryInputs.push_back("governance: " + snapshot.governance.rootPrincipal);
+    bundle.mandatoryInputs.push_back("constitution: " + std::to_string(snapshot.constitution.articles.size()) + " articles bind");
+    bundle.mandatoryInputs.push_back("objective: " + snapshot.state.objective);
+    bundle.mandatoryInputs.push_back("candidate: " + snapshot.state.candidateRef);
+    bundle.mandatoryInputs.push_back("next boundary: " + snapshot.state.nextBoundaryRef);
+    bundle.mandatoryInputs.push_back("open conflicts: " + std::to_string(snapshot.conflicts.size()));
+
+    // protected constraints, derived verbatim from the policy table in cognition
+    for (const auto& row : snapshot.policy.handoff)
+    {
+        if (row.requiresH2)
+        {
+            bundle.protectedConstraints.push_back(
+                "H2 review evidence is mandatory for this operation class");
+        }
+        if (row.rootPrincipalOnly)
+        {
+            bundle.protectedConstraints.push_back("root-principal governance class");
+        }
+    }
+    bundle.protectedConstraints.push_back("typed handoffs are never verbally waived (ADR-0036)");
+    bundle.protectedConstraints.push_back("unattended automation is read-only (ADR-0036)");
+
+    // candidates: typed, deterministic order, shrunk by the budget only;
+    // dropped material is explained (DR-007)
+    const std::size_t budget = query.tokenBudget == 0 ? 16 : query.tokenBudget;
+    std::size_t used         = 0;
+    for (const auto& decision : snapshot.decisions)
+    {
+        const BundleCandidate candidate { "decision", std::to_string(decision.id),
+                                          decision.status == Lifecycle::Accepted ? "accepted: " + decision.title
+                                                                                 : "lifecycle: " + decision.title };
+        if (used < budget)
+        {
+            bundle.candidates.push_back(candidate);
+            ++used;
+        }
+        else
+        {
+            bundle.omissions.push_back({ "decision " + std::to_string(decision.id),
+                                         "token budget; floors and constraints were never touched" });
+        }
+    }
+    for (const auto& record : snapshot.memory)
+    {
+        if (record.status != MemoryRecord::Status::Active)
+        {
+            continue; // superseded memory leaves the default retrieval corpus
+        }
+        const BundleCandidate candidate { "memory", record.title, record.statement };
+        if (used < budget)
+        {
+            bundle.candidates.push_back(candidate);
+            ++used;
+        }
+        else
+        {
+            bundle.omissions.push_back({ "memory " + record.title,
+                                         "token budget; floors and constraints were never touched" });
+        }
+    }
+
+    // obligations: three-valued, never silently guessed (ADR-0033 §6)
+    for (const auto& obligation : snapshot.obligations)
+    {
+        switch (obligation.status)
+        {
+        case Obligation::Status::Done:
+        case Obligation::Status::Cancelled:
+        case Obligation::Status::Superseded:
+            bundle.obligations.push_back({ obligation.id,
+                                           ObligationEvaluation::Evaluation::Met });
+            break;
+        case Obligation::Status::Open:
+        case Obligation::Status::Deferred:
+            bundle.obligations.push_back({ obligation.id,
+                                           ObligationEvaluation::Evaluation::Unknown });
+            break;
+        case Obligation::Status::Blocked:
+            bundle.obligations.push_back({ obligation.id,
+                                           ObligationEvaluation::Evaluation::Unmet });
+            break;
+        }
+    }
+    return bundle;
+}
+
+std::string QivenContext::RenderBundle(const ContextBundle& bundle, OutputView view)
+{
+    std::string text;
+    const std::string eol(1, '\n'); // newline as a char: heredocs eat escapes
+    if (view == OutputView::Machine)
+    { // deterministic flat rendering; parse this, never the human view
+        text += "snapshot=" + bundle.snapshot + eol;
+        for (const auto& floor : bundle.mandatoryInputs)
+        {
+            text += "floor|" + floor + eol;
+        }
+        for (const auto& constraint : bundle.protectedConstraints)
+        {
+            text += "constraint|" + constraint + eol;
+        }
+        for (const auto& candidate : bundle.candidates)
+        {
+            text += "candidate|" + candidate.kind + "|" + candidate.id + "|" + candidate.summary + eol;
+        }
+        for (const auto& obligation : bundle.obligations)
+        {
+            text += "obligation|" + std::to_string(obligation.id) + "|" + std::to_string(static_cast<int>(obligation.evaluation)) + eol;
+        }
+        for (const auto& omission : bundle.omissions)
+        {
+            text += "omission|" + omission.what + "|" + omission.reason + eol;
+        }
+        text += "authorization: not_granted" + eol; // without exception (ADR-0033 §6)
+        return text;
+    }
+    text += "[ RUN] bundle " + bundle.snapshot + eol;
+    text += "[ OK ] floors: " + std::to_string(bundle.mandatoryInputs.size()) + ", constraints: " + std::to_string(bundle.protectedConstraints.size()) + ", candidates: " + std::to_string(bundle.candidates.size()) + ", omissions: " + std::to_string(bundle.omissions.size()) + eol;
+    text += "authorization: not_granted" + eol;
+    return text;
 }
 
 std::shared_ptr<const Snapshot> QivenContext::CanonicalHeadLocked()

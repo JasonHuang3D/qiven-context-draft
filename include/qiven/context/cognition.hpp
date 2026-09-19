@@ -196,12 +196,27 @@ struct EvidenceRecord // evidence/audits — immutable once written
     std::string content; // PASS/FAIL, identities, digests
 };
 
-struct State // compact current operational state
-{
-    Yaml activeWork;   // objective, checkpoint, candidate, next boundary
-    Yaml current;      // compact narrative
-    Yaml repositories; // STABLE INVENTORY ONLY — never caches live refs
-    Yaml roadmap;      // ordered plan items
+struct StateView                 // compact current operational state, TYPED (pit P-15: the
+{                                // 2026-09-19 boot found prose state surfaces contradicting
+                                 // each other; references make coherence gate-checkable)
+    std::string objective;       // the active objective
+    std::string current;         // compact narrative (UpdateState writes this)
+    ContentId checkpointRef;     // latest session checkpoint identity (empty = none)
+    std::string candidateRef;    // current candidate identity ("not-created" allowed)
+    std::string nextBoundaryRef; // MUST reference an existing OPEN obligation id
+    Yaml repositories;           // STABLE INVENTORY ONLY — never caches live refs
+    Yaml roadmap;                // ordered plan items
+};
+
+struct ViewSpec                           // DURABLE participant adaptation — context, not runtime (DR-008,
+{                                         // P-40: exports must carry it; integrity is gate-checked). The
+                                          // live session binding stays a runtime parameter.
+    ContentId id;                         // "zcode-jason"
+    std::string agent;                    // agent family
+    std::string human;                    // human id
+    std::string summary;                  // what this view adapts
+    std::vector<std::string> profileRefs; // preference/environment/workflow refs:
+                                          // non-empty, no duplicates (integrity)
 };
 
 enum class Role // canonical authority packages (R4)
@@ -224,11 +239,12 @@ struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
     Governance governance;
     Constitution constitution;
     PolicyTable policy;
-    State state;
+    StateView state;
     std::vector<Decision> decisions;
     std::vector<MemoryRecord> memory;
     std::vector<Obligation> obligations;
     std::vector<EvidenceRecord> evidence;
     std::vector<Conflict> conflicts;
+    std::vector<ViewSpec> views;
 };
 } // namespace qiven::context
