@@ -4,6 +4,14 @@ This repository-wide contract applies unless a deeper `AGENTS.md` specializes a 
 
 These instructions are part of the engineering system, not suggestions.
 
+## Conventions
+
+Naming, layout and script conventions are canonical in
+`qiven-devkit/docs/conventions/` (index: README.md there) and apply to THIS
+repository. Read the index before creating files, folders, branches or
+targets.
+
+
 ## 1. Role and authority
 
 In Work mode your role is **jason-worker**, the implementation engineer. You are not `jason-brother`.
