@@ -724,6 +724,37 @@ int main()
     QCD_CHECK(!QivenContext::RetireCognition(retired)); // already retired
     QCD_CHECK(!retired->state->memory.empty());         // pinned object alive
 
+    // --- Phase 3: session economics, process types, quarantine machine --------
+
+    // pit.checkpoint_tracks_transactions (P-16): the checkpoint names WHY it
+    // was written and records both sides of a turn
+    QCD_CHECK(!llm->checkpoint.acceptedRefs.empty());
+    QCD_CHECK(llm->checkpoint.lastTrigger == CheckpointTrigger::MaterialTransaction);
+    QCD_CHECK(!llm->checkpoint.unacceptedCandidates.empty());
+    QCD_CHECK(!llm->checkpoint.servingDisclosure.empty());
+    QCD_CHECK(llm->turnBudget.soft == std::chrono::seconds(26 * 60)); // the observed boundary
+
+    // the quarantine state machine is FAIL-CLOSED (review §10, S10-R2):
+    // VerifyRestored moves Isolated -> Verified (root principal only);
+    // PromoteAuthority refuses everything but AuthorityPending — checksum
+    // success, import or uptime never promote; AuthorityPending is only
+    // reachable via a canonical cutover ADR (out of draft scope by design)
+    const Bytes artifact2 = QivenContext::ReadFromCognition(fresh(), Query {});
+    CognitionSource artifactSource2;
+    artifactSource2.kind           = CognitionSourceKind::HandoffArtifact;
+    artifactSource2.inlineBytes    = artifact2;
+    artifactSource2.expectedDigest = DraftContentId(artifact2);
+    const auto isolated            = QivenContext::CreateCognition(artifactSource2);
+    QCD_CHECK(isolated != nullptr && isolated->quarantine == QuarantineState::Isolated);
+    const AuthenticatedActor rootActor { "github:JasonHuang3D", Role::Owner, "owner-session",
+                                         "root-principal", "n/a" };
+    QCD_CHECK(QivenContext::PromoteAuthority(isolated, rootActor) == nullptr); // not AuthorityPending
+    const auto verified = QivenContext::VerifyRestored(isolated, rootActor);
+    QCD_CHECK(verified != nullptr && verified->quarantine == QuarantineState::Verified);
+    QCD_CHECK(verified->digest == isolated->digest);                           // same content, new quarantine state
+    QCD_CHECK(QivenContext::PromoteAuthority(verified, rootActor) == nullptr); // still fail-closed
+    QCD_CHECK(QivenContext::VerifyRestored(isolated, stranger()) == nullptr);  // stranger refused
+
     // --- review §9/§10 + S7-R3: the RUNTIME REBIRTH test -----------------------
     // Generation A ran above: Human/LLM/Client/Device were created, used, and
     // will now be DESTROYED. Only durable cognition (the store) survives.

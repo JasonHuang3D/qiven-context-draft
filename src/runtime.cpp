@@ -9,6 +9,7 @@
 
 #include <qiven/context/runtime.hpp>
 
+#include <chrono>
 #include <utility>
 
 namespace qiven::context
@@ -38,8 +39,9 @@ constexpr std::string_view refusalName(RefusalReason reason)
 void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::string& result,
                WorkMode mode)
 {
-    const auto handle = pCognition; // pin lifetime for this whole cycle;
-                                    // authority is fenced by the grant (DR-010)
+    const auto turnStart = std::chrono::steady_clock::now(); // session economics (DR-012)
+    const auto handle    = pCognition;                       // pin lifetime for this whole cycle;
+                                                             // authority is fenced by the grant (DR-010)
     if (!handle)
     {
         result = name + ": no cognition bound";
@@ -50,10 +52,12 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
     const auto grant = QivenContext::AcquireGrant(actor, mode);
     if (!grant.has_value())
     {
-        checkpoint.nextAction = "fail closed: a competing flow holds the chain";
-        result                = name + ": grant refused";
+        checkpoint.lastTrigger = CheckpointTrigger::TurnBoundary;
+        checkpoint.nextAction  = "fail closed: a competing flow holds the chain";
+        result                 = name + ": grant refused";
         return;
     }
+    checkpoint.servingDisclosure = actor.servingModel + "/" + actor.binding;
 
     // 2. full snapshot for thinking — the typed Bundle with floors lands in
     //    Phase 2 (DR-007); token cost is a Bundle concern, never K5's
@@ -86,8 +90,9 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
         // so the next cycle sees the advanced world (a runtime rebind, R3)
         pCognition = verdict.successor;
         checkpoint.acceptedRefs.push_back(verdict.successor->revision);
-        checkpoint.nextAction = "continue";
-        result                = name + ": delta applied; head=" + verdict.successor->revision.value;
+        checkpoint.lastTrigger = CheckpointTrigger::MaterialTransaction;
+        checkpoint.nextAction  = "continue";
+        result                 = name + ": delta applied; head=" + verdict.successor->revision.value;
         return;
     }
 
@@ -95,6 +100,12 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
     const RecoveryAction action =
         QivenContext::RecoveryFor(*handle->state, verdict.reason); // pre-write table: policy rows are stable
     checkpoint.unacceptedCandidates.push_back(transaction.base);
+    if (verdict.outcome == Verdict::Outcome::OutcomeUnknown)
+    {
+        // typed absence: the commit outcome is genuinely unknowable right now
+        checkpoint.evidenceGaps.push_back({ "commit outcome for key " + transaction.idempotencyKey,
+                                            "store acknowledgement lost; the receipt records it as unresolved" });
+    }
     switch (action)
     {
     case RecoveryAction::RereadRethink:
@@ -121,5 +132,20 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
         break;
     }
     result = name + ": refused (" + std::string(refusalName(verdict.reason)) + "); next: " + checkpoint.nextAction;
+    annotateBudget(turnStart);
+}
+
+void LLM::annotateBudget(std::chrono::steady_clock::time_point turnStart)
+{
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - turnStart);
+    if (elapsed >= turnBudget.hard)
+    {
+        checkpoint.nextAction += "; HARD budget exceeded: halt";
+    }
+    else if (elapsed >= turnBudget.soft)
+    {
+        checkpoint.nextAction += "; soft budget reached: finish the safe checkpoint";
+    }
 }
 } // namespace qiven::context

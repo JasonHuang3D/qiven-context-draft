@@ -12,6 +12,7 @@
 
 #include <qiven/context/persistence.hpp>
 
+#include <chrono>
 #include <functional>
 #include <string>
 #include <vector>
@@ -32,11 +33,50 @@ struct RemoteDevice final : Device     // [S] github.com: a SECOND device partic
     std::string role { "ci+replica" }; // flows back through ordinary gated writes
 };
 
-struct ParticipantBinding       // runtime; CANNOT live in cognition (R1/R3)
-{                               // qualification evidence enters cognition via
-    Role role { Role::Worker }; // normal transactions (audits); the current
-    std::string modelId;        // binding itself never does. caller-declared
-                                // serving model = disclosure duty (ADR-0035)
+struct Qualification // ADR-0035: evidence-based binding qualification; the
+{                    // upgrade to Qualified is owner-reserved (self-cert ban)
+    enum class Status
+    {
+        Untested,
+        Provisional,
+        Qualified,
+    };
+    Status status { Status::Untested };
+    std::string evidenceRef; // audits / PR records that prove the status
+    std::string date;
+};
+
+struct ParticipantBinding        // runtime; CANNOT live in cognition (R1/R3)
+{                                // qualification evidence enters cognition via
+    Role role { Role::Worker };  // normal transactions (audits); the current
+    std::string modelId;         // binding itself never does. caller-declared
+    Qualification qualification; // serving model = disclosure duty (ADR-0035)
+};
+
+struct EvidenceGap          // typed absence: gaps are RECORDED, never synthesized
+{                           // (constitution #5; the v2-v5 missing sessions lesson)
+    std::string what;       // what is missing or unresolved
+    std::string whyUnknown; // why it cannot be stated now
+};
+
+enum class CheckpointTrigger // DR-012: the loop writes the checkpoint, and
+{                            // every write names WHY (P-16: lagging
+    TurnBoundary,            // checkpoints were the drift class)
+    MaterialTransaction,
+    AsyncExit,
+    SessionClose,
+};
+
+struct TurnBudget                           // the observed ~26-minute Chat tool-turn boundary is the
+{                                           // budget that makes checkpoint discipline non-optional
+    std::chrono::seconds soft { 26 * 60 };  // finish the safe checkpoint, stop
+    std::chrono::seconds hard { 2 * soft }; // halt outright
+};
+
+struct BoundedWait // tools: dispatch != completion (v5 lesson); bounded
+{                  // observations, no sleep/poll loops
+    int maxObservations { 3 };
+    std::chrono::milliseconds perObservation { 60000 };
 };
 
 struct SessionCheckpoint   // PART 4: session sidecar — continuity evidence
@@ -45,8 +85,11 @@ struct SessionCheckpoint   // PART 4: session sidecar — continuity evidence
     std::string exactTask; // identity (disclosure duty, ADR-0035 rule 4)
     std::vector<RevisionId> acceptedRefs;
     std::vector<RevisionId> unacceptedCandidates;
-    std::string knownGaps; // gaps recorded, never synthesized
+    std::vector<EvidenceGap> evidenceGaps; // typed absence, never synthesized
+    std::string knownGaps;                 // gaps recorded, never synthesized
     std::string nextAction;
+    CheckpointTrigger lastTrigger { CheckpointTrigger::TurnBoundary };
+    std::string servingDisclosure; // who actually served the turns
 };
 
 struct HumanPreference // owner-side adaptation; session-injected;
@@ -58,6 +101,7 @@ struct HumanPreference // owner-side adaptation; session-injected;
 struct LLM
 {
     std::string name;           // value: intrinsic identity ("GPT5")
+    TurnBudget turnBudget;      // session economics (DR-012)
     CognitionHandle pCognition; // lifetime pinned per Work cycle;
                                 // const: cognition is not mutable
                                 // through participants (DR-001)
@@ -75,6 +119,10 @@ struct LLM
     // recovery; the policy table in cognition does)
     void Work(const std::string& prompt, const AuthenticatedActor& actor, std::string& result,
               WorkMode mode = WorkMode::SupervisedForeground);
+
+    // truthful budget annotation on the checkpoint (observable state only —
+    // no invented percentages; MEM-8F2C41)
+    void annotateBudget(std::chrono::steady_clock::time_point turnStart);
 };
 
 struct LLMClientTool // the relay; NO cognition access (R5)

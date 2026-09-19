@@ -299,6 +299,24 @@ struct ContextTransaction
 // content identity of the ordered operations — what an H2 review binds to
 [[nodiscard]] ContentId DigestOperations(const std::vector<Operation>& operations);
 
+struct ReviewRecord // the process-layer artifact an H2Evidence comes FROM
+{                   // (process-model §2): the digest binds it to the exact
+                    // delta; the binding enables the self-certification ban
+    ContentId reviewedDeltaDigest;
+    PrincipalId reviewer;
+    std::string reviewerBinding;
+    std::string reviewRef;
+    bool sameSessionLimitation { false }; // disclosed when reviewer ~= author instance
+    std::vector<std::string> findings;    // blocking / non-blocking, with evidence
+};
+
+enum class ContinuityTrialKind // ADR-0034: delivery profiles are distinct
+{                              // properties (pit P-13); a remote cold boot
+    RemoteColdBoot,            // NEVER substitutes for an artifact trial, and
+    CanonicalArtifactHandoff,  // acceptance trials are REAL topologies — they
+    HumanSuccession,           // cannot be simulated by the authoring session
+};
+
 struct Verdict // the write gate's typed outcome (DR-002); a bool erases the
 {              // recovery rule — the reason IS cognition
     enum class Outcome
@@ -471,6 +489,17 @@ public:
     // (lifetime = shared_ptr; authority = the active grant — the v1 conflation,
     // split in v2, made a type shape in v3)
     static bool RetireCognition(const CognitionHandle& handle);
+
+    // quarantine state machine (fail-closed): Isolated -> Verified requires
+    // the root principal (integrity was already checked at restore);
+    // AuthorityPending -> Promoted is the governed cutover act itself —
+    // checksum success, import or uptime NEVER promote (review §10, S10-R2).
+    // Nothing in this draft sets AuthorityPending: that requires a canonical
+    // cutover ADR, which is out of draft scope by design.
+    [[nodiscard]] static CognitionHandle VerifyRestored(const CognitionHandle& handle,
+                                                        const AuthenticatedActor& actor);
+    [[nodiscard]] static CognitionHandle PromoteAuthority(const CognitionHandle& handle,
+                                                          const AuthenticatedActor& actor);
 
     // the canonical head snapshot, for ports that verify against live
     // governance; empty principal on an unreadable store
