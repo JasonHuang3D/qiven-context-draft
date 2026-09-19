@@ -304,3 +304,46 @@ gets its context as parameters; a port that needs more must say so in its
 signature, which makes the dependency edge reviewable.
 
 **Pinned by.** `pit.port_never_reenters_service` (`RecordingVerifier`).
+
+## DR-014 — Three orthogonal identities
+
+**Context.** `ContentId` doubled as the snapshot-integrity hash and the
+storage-history CAS token; no real storage (git) can chain a commit on a
+content hash (review §3).
+
+**Decision.** `SnapshotDigest` (integrity), `RevisionId` (storage history),
+`GrantId` (authority capability) are distinct types. CAS compares revisions;
+integrity compares digests.
+
+**Rejected.** One umbrella `ContentId` with conventions — conventions erode;
+the K4 lesson again.
+
+**Pinned by.** store-contract tests; golden digest assertions.
+
+## DR-015 — Materializations are immutable; writes mint successors
+
+**Context.** The v2 alias race survived the v3 split: the service mutated the
+same `Materialization` object participants held as `const` (review §2).
+
+**Decision.** A write mints a successor `Materialization`; the registry
+advances; published objects never mutate; a pinned handle is a consistent
+world for a whole Work cycle.
+
+**Rejected.** Recursive locks or copy-on-read — both hide the race instead of
+removing it.
+
+**Pinned by.** reader-boot-preserves-writer + pinned-world assertions; rebirth
+test.
+
+## DR-016 — Grants are minted capabilities
+
+**Context.** A value-equal forged grant borrowed the holder's verified
+identity (review §4).
+
+**Decision.** Private constructor, move-only, minted `GrantId` validated
+against the active lease.
+
+**Rejected.** HMAC-style grant MACs — cryptographic theater for an in-process
+capability; the type system suffices at this layer.
+
+**Pinned by.** compile-time static_asserts in `persistence_fencing.cpp`.

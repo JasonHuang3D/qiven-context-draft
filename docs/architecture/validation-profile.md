@@ -40,6 +40,7 @@ Named per the ADR-0034 rule that every proof declares its profile:
 | 0 — design corpus | the demand/supply model is written and reviewable | owner review of `docs/architecture/` (done 2026-09-19) |
 | 1 — authority, verdicts, corruption-safety | P0 pit tests green in Debug and Release: split-brain refusal, unverified actor, fail-closed grant state, content-bound H2, no-retry on handoff refusal, reader-boot preserves writer, corruption/resource fail-closed, golden vectors | Devkit gate PASS at exact head |
 | 2 — transactions, conflicts, views, bundles | atomicity, idempotency, conflict gate, view integrity, bundle floors | same, plus K2-shaped negative fixtures |
+| 2C — semantic closure (2026-09-20 review) | the phase 1/2 CLAIMED semantics are actually proven: orthogonal identities, immutable materializations, unforgeable grants, typed store receipts, authority-bound H2, graph-edge validation, RUNTIME REBIRTH (S7-R3 executable), semantic bundle floors | same, plus compile-time grant-unforgeability asserts and the rebirth test |
 | 3 — session economics, process types | checkpoint triggers, liveness, self-certification gate, promotion stub | same |
 | 4 — validation closeout | inventory executed (every C row traced, every J row pinned), inconsistencies classified and resolved or recorded | dated report in canonical `evidence/audits/` bound to the exact draft commit |
 

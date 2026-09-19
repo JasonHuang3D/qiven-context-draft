@@ -43,8 +43,8 @@ struct SessionCheckpoint   // PART 4: session sidecar — continuity evidence
 {                          // only, never canonical (const. #5); NOT a
     std::string sessionId; // Snapshot member. includes serving-model
     std::string exactTask; // identity (disclosure duty, ADR-0035 rule 4)
-    std::vector<ContentId> acceptedRefs;
-    std::vector<ContentId> unacceptedCandidates;
+    std::vector<RevisionId> acceptedRefs;
+    std::vector<RevisionId> unacceptedCandidates;
     std::string knownGaps; // gaps recorded, never synthesized
     std::string nextAction;
 };
@@ -116,8 +116,11 @@ struct Human // all-value, zero pointers — the most
     {
         // the actor's identity comes from the human's verified principal; the
         // role/binding/serving disclosure come from the client-tool binding
+        // disclosure consistency (review §10): the serving model names the
+        // ACTUALLY bound LLM, so a runtime rebind cannot drift the disclosure
         AuthenticatedActor actor { verifiedPrincipal, pClient->binding.role,
-                                   pClient->binding.modelId, "draft-demo-model", "standard" };
+                                   pClient->binding.modelId, pClient->pCurrentLLM->name,
+                                   "standard" };
         return pClient->ControlLLMFromHuman(actor, prompt, result);
     }
 };

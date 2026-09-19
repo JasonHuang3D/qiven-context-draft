@@ -74,7 +74,7 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
         result                = name + ": no material cognition this turn";
         return;
     }
-    transaction.base = handle->contentId; // durable fencing token: my thinking assumed this
+    transaction.base = handle->revision; // durable fencing token: my thinking assumed this
 
     // 6. gated write — every gate inside the service; verdict carries the reason
     const Verdict verdict = QivenContext::WriteToCognition(handle, transaction, *grant);
@@ -82,9 +82,12 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
 
     if (verdict.outcome == Verdict::Outcome::Applied)
     {
-        checkpoint.acceptedRefs.push_back(verdict.successorId); // post-write: the advanced id
+        // review §2: the write minted a SUCCESSOR materialization; rebind to it
+        // so the next cycle sees the advanced world (a runtime rebind, R3)
+        pCognition = verdict.successor;
+        checkpoint.acceptedRefs.push_back(verdict.successor->revision);
         checkpoint.nextAction = "continue";
-        result                = name + ": delta applied; head=" + verdict.successorId;
+        result                = name + ": delta applied; head=" + verdict.successor->revision.value;
         return;
     }
 

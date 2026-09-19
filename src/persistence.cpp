@@ -1,6 +1,7 @@
 // ============================================================================
-// persistence.cpp — serialization (v2, fail-closed), memory store, and the
-// gated service with policy-as-data verdicts
+// persistence.cpp — serialization (v5, fail-closed), memory store, and the
+// gated service with orthogonal identities, immutable materializations and
+// policy-as-data verdicts (v3 phase 2C)
 // ============================================================================
 
 #include <qiven/context/persistence.hpp>
@@ -20,7 +21,7 @@ namespace qiven::context
 {
 namespace
 {
-constexpr std::uint8_t kSerializationVersion = 4;
+constexpr std::uint8_t kSerializationVersion = 5;
 constexpr std::uint32_t kMaxRecords          = 100000; // resource-abuse guard (DR-009)
 
 // --- little-endian TLV writers (fixed field order, versioned) ----------------
@@ -295,6 +296,14 @@ Bytes serializeImpl(const Snapshot& snapshot)
         putStr(bytes, conflict.resolution);
     }
 
+    putU32(bytes, static_cast<std::uint32_t>(snapshot.profiles.size()));
+    for (const auto& profile : snapshot.profiles)
+    {
+        putStr(bytes, profile.id);
+        putStr(bytes, profile.kind);
+        putStr(bytes, profile.summary);
+    }
+
     putU32(bytes, static_cast<std::uint32_t>(snapshot.views.size()));
     for (const auto& view : snapshot.views)
     {
@@ -477,6 +486,20 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
 
     if (reader.ok())
     {
+        const auto profileCount = reader.cappedCount("profile count");
+        snapshot.profiles.reserve(profileCount);
+        for (std::uint32_t i = 0; reader.ok() && i < profileCount; ++i)
+        {
+            ProfileRecord profile;
+            profile.id      = reader.str("profile id");
+            profile.kind    = reader.str("profile kind");
+            profile.summary = reader.str("profile summary");
+            snapshot.profiles.push_back(std::move(profile));
+        }
+    }
+
+    if (reader.ok())
+    {
         const auto viewCount = reader.cappedCount("view count");
         snapshot.views.reserve(viewCount);
         for (std::uint32_t i = 0; reader.ok() && i < viewCount; ++i)
@@ -514,7 +537,7 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
 Constitution makeConstitution()
 {
     Constitution constitution; // the 18 article titles; canonical full texts are
-                               // referenced content (DR-007 completion is Phase 2)
+                               // referenced content (DR-007 completion is phased)
     constitution.articles = {
         "Project cognition must outlive its participants",
         "Capture conservatively, canonicalize deliberately, retrieve selectively",
@@ -629,19 +652,51 @@ const Conflict* findConflict(const Snapshot& snapshot, const std::string& id)
     }
     return nullptr;
 }
-} // namespace
 
-ContentId DraftContentId(const Bytes& stateBytes)
+const ProfileRecord* findProfile(const Snapshot& snapshot, const std::string& id)
+{
+    for (const auto& profile : snapshot.profiles)
+    {
+        if (profile.id == id)
+        {
+            return &profile;
+        }
+    }
+    return nullptr;
+}
+
+std::uint64_t fnv1a(const std::string& text, const Bytes& bytes)
 {
     std::uint64_t hash = 1469598103934665603ULL; // FNV-1a 64 — draft stand-in for SHA-256
-    for (const std::byte byte : stateBytes)
+    for (const char ch : text)
+    {
+        hash ^= static_cast<std::uint64_t>(static_cast<unsigned char>(ch));
+        hash *= 1099511628211ULL;
+    }
+    for (const std::byte byte : bytes)
     {
         hash ^= static_cast<std::uint64_t>(std::to_integer<unsigned char>(byte));
         hash *= 1099511628211ULL;
     }
+    return hash;
+}
+
+std::string hex64(std::uint64_t hash)
+{
     char text[17];
     std::snprintf(text, sizeof text, "%016llx", static_cast<unsigned long long>(hash));
-    return "draft-" + std::string(text);
+    return std::string(text);
+}
+} // namespace
+
+ContentId DraftContentId(const Bytes& stateBytes)
+{
+    return "draft-" + hex64(fnv1a("", stateBytes));
+}
+
+SnapshotDigest DraftSnapshotDigest(const Bytes& stateBytes)
+{
+    return SnapshotDigest { "snap-" + hex64(fnv1a("", stateBytes)) };
 }
 
 ContentId DigestOperations(const std::vector<Operation>& operations)
@@ -671,7 +726,7 @@ namespace
 [[nodiscard]] std::string RequestDigestOf(const ContextTransaction& transaction)
 { // digest of the complete request: base, ordered operations, evidence (ADR-0033 §4)
     Bytes bytes;
-    putStr(bytes, transaction.base);
+    putStr(bytes, transaction.base.value);
     putStr(bytes, DigestOperations(transaction.operations));
     putStr(bytes, transaction.handoffEvidenceRef);
     putU8(bytes, transaction.h2.has_value() ? 1 : 0);
@@ -679,6 +734,7 @@ namespace
     {
         putStr(bytes, transaction.h2->reviewedDeltaDigest);
         putStr(bytes, transaction.h2->reviewer);
+        putStr(bytes, transaction.h2->reviewerBinding);
         putStr(bytes, transaction.h2->reviewRef);
     }
     return DraftContentId(bytes);
@@ -687,27 +743,28 @@ namespace
 
 // --- MemoryStore: the contract, proven ---------------------------------------
 
-ContentId MemoryStore::append(const Bytes& stateBytes, const ContentId& base)
+StoreReceipt MemoryStore::compareAndSwap(const RevisionId& base, const Bytes& stateBytes)
 {
-    if (!states_.empty() && base != head_)
+    if (!revisions_.empty() && base != head_)
     {
-        return {}; // divergence: appends must chain onto current head
+        return StoreReceipt { StoreReceipt::Kind::CompareFailed, {} }; // definitely not committed
     }
-    const ContentId id = DraftContentId(stateBytes);
-    if (!states_.empty() && id == head_)
+    if (!revisions_.empty() && revisions_.back().second == stateBytes)
     {
-        return id; // idempotent re-append of the current head
+        // idempotent re-commit: the head already holds exactly these bytes
+        return StoreReceipt { StoreReceipt::Kind::Committed, head_ };
     }
-    states_.emplace_back(id, stateBytes);
+    const RevisionId id { "rev-" + hex64(fnv1a(base.value, stateBytes)) };
+    revisions_.emplace_back(id, stateBytes);
     head_ = id;
-    return id;
+    return StoreReceipt { StoreReceipt::Kind::Committed, id };
 }
 
-Bytes MemoryStore::materialize(const ContentId& id) const
+Bytes MemoryStore::materialize(const RevisionId& revision) const
 {
-    for (const auto& [key, stateBytes] : states_)
+    for (const auto& [key, stateBytes] : revisions_)
     {
-        if (key == id)
+        if (key == revision)
         {
             return stateBytes;
         }
@@ -715,18 +772,12 @@ Bytes MemoryStore::materialize(const ContentId& id) const
     return {};
 }
 
-Bytes MemoryStore::readDelta(const ContentId& base, const ContentId& target) const
+bool MemoryStore::verify(const RevisionId& revision) const
 {
-    static_cast<void>(base);    // state-replication: the receiver materializes the
-    return materialize(target); // target; a real transport encodes the diff
-}
-
-bool MemoryStore::verify(const ContentId& id) const
-{
-    for (const auto& [key, stateBytes] : states_)
+    for (const auto& [key, stateBytes] : revisions_)
     {
         static_cast<void>(stateBytes);
-        if (key == id)
+        if (key == revision)
         {
             return true;
         }
@@ -734,40 +785,33 @@ bool MemoryStore::verify(const ContentId& id) const
     return false;
 }
 
-ContentId MemoryStore::head() const
+RevisionId MemoryStore::head() const
 {
     return head_;
 }
 
 // --- GitStore: documented sketch, deliberately unimplemented -----------------
 
-ContentId GitStore::append(const Bytes& stateBytes, const ContentId& base)
+StoreReceipt GitStore::compareAndSwap(const RevisionId& base, const Bytes& stateBytes)
 {
+    static_cast<void>(base);
     static_cast<void>(stateBytes);
-    static_cast<void>(base);
     throw std::logic_error("qiven-context-draft: git transport is a documented sketch");
 }
 
-Bytes GitStore::materialize(const ContentId& id) const
+Bytes GitStore::materialize(const RevisionId& revision) const
 {
-    static_cast<void>(id);
+    static_cast<void>(revision);
     throw std::logic_error("qiven-context-draft: git transport is a documented sketch");
 }
 
-Bytes GitStore::readDelta(const ContentId& base, const ContentId& target) const
+bool GitStore::verify(const RevisionId& revision) const
 {
-    static_cast<void>(base);
-    static_cast<void>(target);
+    static_cast<void>(revision);
     throw std::logic_error("qiven-context-draft: git transport is a documented sketch");
 }
 
-bool GitStore::verify(const ContentId& id) const
-{
-    static_cast<void>(id);
-    throw std::logic_error("qiven-context-draft: git transport is a documented sketch");
-}
-
-ContentId GitStore::head() const
+RevisionId GitStore::head() const
 {
     throw std::logic_error("qiven-context-draft: git transport is a documented sketch");
 }
@@ -798,9 +842,14 @@ std::atomic<Epoch> QivenContext::g_epoch { 0 };
 std::shared_ptr<ICognitionStore> QivenContext::g_store;
 std::shared_ptr<IIdentityVerifier> QivenContext::g_identity;
 std::vector<QivenContext::Registry> QivenContext::g_live;
-std::optional<ExecutionGrant> QivenContext::g_activeGrant;
+GrantId QivenContext::g_activeGrantId;
 AuthenticatedActor QivenContext::g_grantActor;
 std::map<std::string, QivenContext::Receipt> QivenContext::g_receipts;
+
+ExecutionGrant::ExecutionGrant(GrantId id, Epoch epoch, PrincipalId principal, WorkMode mode) :
+id_(std::move(id)), epoch_(epoch), principal_(std::move(principal)), mode_(mode)
+{
+}
 
 void QivenContext::attachStore(std::shared_ptr<ICognitionStore> store)
 {
@@ -828,20 +877,26 @@ CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, Des
     };
 
     Bytes bytes;
+    RevisionId revision; // a quarantined artifact has NO storage identity
     QuarantineState quarantine { QuarantineState::Promoted };
     switch (source.kind)
     {
     case CognitionSourceKind::CanonicalRemote:
     {
-        const ContentId id = source.contentId.empty() ? g_store->head() : source.contentId;
-        bytes              = g_store->materialize(id);
+        const RevisionId id = IsEmpty(source.revision) ? g_store->head() : source.revision;
+        bytes               = g_store->materialize(id);
         if (bytes.empty())
         {
             // genesis: no canonical state yet — materialize the empty cognition
             // (governance + constitution + default policy) and append it as state #1
-            bytes                    = serializeImpl(makeGenesis());
-            const ContentId appended = g_store->append(bytes, {});
-            QIVEN_ASSERT(!appended.empty());
+            bytes               = serializeImpl(makeGenesis());
+            const auto appended = g_store->compareAndSwap(RevisionId {}, bytes);
+            QIVEN_ASSERT(appended.kind == StoreReceipt::Kind::Committed);
+            revision = appended.revision;
+        }
+        else
+        {
+            revision = id;
         }
         break;
     }
@@ -870,29 +925,31 @@ CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, Des
         return fail(parsed.error); // corruption fails closed; never an assert (DR-009)
     }
 
-    const Epoch epoch = g_epoch.fetch_add(1) + 1; // fencing token per materialization
-    auto live         = std::make_shared<Materialization>();
-    live->state       = std::make_shared<const Snapshot>(std::move(parsed.snapshot));
-    live->contentId   = DraftContentId(bytes); // content identity of this very state
-    live->epoch       = epoch;
-    live->quarantine  = quarantine;
+    const Epoch epoch  = g_epoch.fetch_add(1) + 1; // fencing token per materialization
+    auto minted        = std::make_shared<Materialization>();
+    minted->state      = std::make_shared<const Snapshot>(std::move(parsed.snapshot));
+    minted->digest     = DraftSnapshotDigest(bytes); // integrity identity
+    minted->revision   = revision;                   // storage identity (empty for artifacts)
+    minted->epoch      = epoch;
+    minted->quarantine = quarantine;
 
-    g_live.push_back(Registry { live });
-    return CognitionHandle { live }; // participants get the const view
+    g_live.push_back(Registry { minted });
+    return CognitionHandle { minted }; // participants get the immutable handle
 }
 
 Data QivenContext::ReadFromCognition(const CognitionHandle& handle, const Query& query)
 {
     static_cast<void>(query); // typed Bundle with floors lands in Phase 2 (DR-007)
     QIVEN_ASSERT(handle != nullptr);
-    // no admission lock: the snapshot is a by-value copy of immutable semantics
+    // no admission lock needed: the materialization is IMMUTABLE (review §2) —
+    // reading a pinned handle can never race the publish path
     return serializeImpl(*handle->state);
 }
 
 std::optional<ExecutionGrant> QivenContext::AcquireGrant(const AuthenticatedActor& actor, WorkMode mode)
 {
     std::lock_guard lock(g_admission);
-    if (g_activeGrant.has_value())
+    if (!IsEmpty(g_activeGrantId))
     {
         return std::nullopt; // split-brain: a second flow is refused, not queued (P-01)
     }
@@ -905,19 +962,21 @@ std::optional<ExecutionGrant> QivenContext::AcquireGrant(const AuthenticatedActo
     {
         return std::nullopt; // identity is never caller-asserted (P-02)
     }
-    const ExecutionGrant grant { g_epoch.load(), actor.principal, mode };
-    g_activeGrant = grant;
-    g_grantActor  = actor;
-    return grant;
+    static std::uint64_t grantSequence = 0;
+    const Bytes sequence { std::byte { static_cast<unsigned char>((++grantSequence) & 0xFF) } };
+    const GrantId id { "grant-" + hex64(fnv1a(actor.principal + "|" + actor.binding, sequence)) };
+    g_activeGrantId = id;
+    g_grantActor    = actor;
+    return ExecutionGrant { id, g_epoch.load(), actor.principal, mode };
 }
 
 void QivenContext::ReleaseGrant(const ExecutionGrant& grant)
 {
     std::lock_guard lock(g_admission);
-    if (g_activeGrant && *g_activeGrant == grant)
+    if (g_activeGrantId == grant.id())
     {
-        g_activeGrant.reset();
-        g_grantActor = AuthenticatedActor {};
+        g_activeGrantId = GrantId {};
+        g_grantActor    = AuthenticatedActor {};
     }
 }
 
@@ -930,28 +989,6 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         return Verdict { Verdict::Outcome::Refused, reason, {} };
     };
 
-    Registry* entry = nullptr; // gate 0: known handle, non-quarantined
-    for (auto& live : g_live)
-    {
-        if (live.live == handle)
-        {
-            entry = &live;
-            break;
-        }
-    }
-    if (entry == nullptr || entry->live->quarantine != QuarantineState::Promoted)
-    {
-        return refuse(RefusalReason::GovernanceDenied); // pit P-33: restore never self-promotes
-    }
-    if (!g_activeGrant || !(*g_activeGrant == grant))
-    {
-        return refuse(RefusalReason::GrantRefused); // stale or foreign grants never regain authority
-    }
-    const auto governance = CanonicalHeadLocked(); // context passed IN — no re-entry (P-42)
-    if (!governance || !g_identity || !g_identity->verify(g_grantActor, *governance))
-    {
-        return refuse(RefusalReason::UnverifiedActor); // re-checked at commit (ADR-0033 §4)
-    }
     // gate 3: idempotency key resolution (DR-011). A same-key same-request
     // replay returns the original durable verdict without re-executing — even
     // when the base has since gone stale; same key with a different request is
@@ -971,11 +1008,35 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             return receipt->second.outcome; // durable outcome, no re-execution
         }
     }
-    if (grant.mode == WorkMode::Unattended && !transaction.operations.empty())
+
+    Registry* entry = nullptr; // gate 0: known handle, non-quarantined
+    for (auto& live : g_live)
+    {
+        if (live.materialization == handle)
+        {
+            entry = &live;
+            break;
+        }
+    }
+    if (entry == nullptr || entry->materialization->quarantine != QuarantineState::Promoted)
+    {
+        return refuse(RefusalReason::GovernanceDenied); // pit P-33: restore never self-promotes
+    }
+    if (IsEmpty(g_activeGrantId) || g_activeGrantId != grant.id())
+    {
+        return refuse(RefusalReason::GrantRefused); // stale or foreign grants never regain authority
+    }
+    const auto governance = CanonicalHeadLocked(); // context passed IN — no re-entry (P-42)
+    if (!governance || !g_identity || !g_identity->verify(g_grantActor, *governance))
+    {
+        return refuse(RefusalReason::UnverifiedActor); // re-checked at commit (ADR-0033 §4)
+    }
+
+    if (grant.mode() == WorkMode::Unattended && !transaction.operations.empty())
     {
         return refuse(RefusalReason::UnattendedMutation); // ADR-0036: read-only default
     }
-    if (transaction.base != entry->live->contentId)
+    if (transaction.base != entry->materialization->revision)
     {
         return refuse(RefusalReason::StaleBase); // durable divergence: re-read (P-25 family)
     }
@@ -983,11 +1044,11 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
     if (transaction.operations.empty())
     {
         return Verdict { Verdict::Outcome::Applied, RefusalReason::StoreDiverged,
-                         entry->live->contentId }; // ordinary turn: nothing to store
+                         handle }; // ordinary turn: nothing to store
     }
 
-    // gates 5-6: policy table + content-bound H2 + invariants, for the WHOLE
-    // transaction before anything applies (no partial snapshot, ADR-0033 §4)
+    // gates 6-7: policy table + AUTHORITY-BOUND H2 + conflict scope, for the
+    // WHOLE transaction before anything applies (no partial snapshot)
     for (const auto& operation : transaction.operations)
     {
         OperationClass opClass = OperationClass::StateUpdate;
@@ -999,13 +1060,16 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         case Operation::Kind::UpsertObligation:
         case Operation::Kind::CloseObligation:
         case Operation::Kind::TransitionObligation: opClass = OperationClass::ObligationWrite; break;
-        case Operation::Kind::UpdateState: opClass = OperationClass::StateUpdate; break;
+        case Operation::Kind::UpdateState:
+        case Operation::Kind::SetNextBoundary: opClass = OperationClass::StateUpdate; break;
         case Operation::Kind::OpenConflict:
         case Operation::Kind::ResolveConflict: opClass = OperationClass::ConflictWrite; break;
-        case Operation::Kind::AddEvidence: opClass = OperationClass::EvidenceWrite; break;
+        case Operation::Kind::AddEvidence:
+        case Operation::Kind::UpsertProfile:
+        case Operation::Kind::AmendViewSpec: opClass = OperationClass::EvidenceWrite; break;
         }
         const HandoffPolicy* row = nullptr;
-        for (const auto& candidate : entry->live->state->policy.handoff)
+        for (const auto& candidate : entry->materialization->state->policy.handoff)
         {
             if (candidate.opClass == opClass)
             {
@@ -1023,9 +1087,18 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             {
                 return refuse(RefusalReason::HandoffMissing); // no-verbal-waiver: no retry
             }
-            if (transaction.h2->reviewer.empty() || transaction.handoffEvidenceRef.empty())
+            // review §5: H2 is authority-bound, not only content-bound
+            if (transaction.h2->reviewer.empty() || transaction.h2->reviewerBinding.empty() || transaction.h2->reviewRef.empty() || transaction.handoffEvidenceRef.empty())
             {
                 return refuse(RefusalReason::HandoffMissing);
+            }
+            if (transaction.h2->reviewerBinding == g_grantActor.binding)
+            {
+                return refuse(RefusalReason::HandoffInvalid); // self-review ban (P-09)
+            }
+            if (transaction.h2->reviewer != governance->governance.rootPrincipal)
+            {
+                return refuse(RefusalReason::HandoffInvalid); // reviewer holds no H2 authority
             }
             if (transaction.h2->reviewedDeltaDigest != DigestOperations(transaction.operations))
             {
@@ -1034,10 +1107,10 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         }
     }
 
-    // gate 6.5: an OPEN conflict whose scope intersects the operation blocks
-    // it (DR-006) — the K4-trial-1 lesson as a compiled gate. Opening and
-    // resolving conflicts is always allowed.
-    const Snapshot& current = *entry->live->state;
+    const Snapshot& current = *entry->materialization->state;
+
+    // gate 7.5: an OPEN conflict whose scope intersects the operation blocks
+    // it (DR-006) — the K4-trial-1 lesson as a compiled gate
     for (const auto& operation : transaction.operations)
     {
         if (operation.kind == Operation::Kind::OpenConflict || operation.kind == Operation::Kind::ResolveConflict)
@@ -1052,6 +1125,8 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             }
         }
     }
+
+    // gate 8: invariants for the WHOLE transaction
     for (const auto& operation : transaction.operations)
     {
         switch (operation.kind)
@@ -1069,8 +1144,26 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
                 }
             }
             break;
+        case Operation::Kind::SupersedeDecision:
+        {
+            const Decision* superseded = findDecision(current, operation.recordId);
+            const Decision* successor  = findDecision(current, operation.successorRecordId);
+            if (superseded == nullptr || successor == nullptr || superseded == successor || superseded->status != Lifecycle::Accepted || successor->status != Lifecycle::Accepted)
+            {
+                return refuse(RefusalReason::InvariantFailed);
+            }
+            if (reachesDecision(current, *successor, operation.recordId))
+            {
+                return refuse(RefusalReason::InvariantFailed); // acyclic supersession (P-36)
+            }
+            if (operation.payload.empty())
+            {
+                return refuse(RefusalReason::InvariantFailed); // transition rationale required
+            }
+            break;
+        }
         case Operation::Kind::AddMemory:
-            if (operation.payload.empty() || operation.provenanceRef.empty())
+            if (operation.payload.empty() || operation.provenanceRef.empty() || operation.aux > 5)
             {
                 return refuse(RefusalReason::InvariantFailed); // pit P-37: no unprovenanced lessons
             }
@@ -1098,30 +1191,6 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             }
             break;
         }
-        case Operation::Kind::UpdateState:
-            if (operation.payload.empty())
-            {
-                return refuse(RefusalReason::InvariantFailed);
-            }
-            break;
-        case Operation::Kind::SupersedeDecision:
-        {
-            const Decision* superseded = findDecision(current, operation.recordId);
-            const Decision* successor  = findDecision(current, operation.successorRecordId);
-            if (superseded == nullptr || successor == nullptr || superseded == successor || superseded->status != Lifecycle::Accepted || successor->status != Lifecycle::Accepted)
-            {
-                return refuse(RefusalReason::InvariantFailed);
-            }
-            if (reachesDecision(current, *successor, operation.recordId))
-            {
-                return refuse(RefusalReason::InvariantFailed); // acyclic supersession (P-36)
-            }
-            if (operation.payload.empty())
-            {
-                return refuse(RefusalReason::InvariantFailed); // transition rationale required
-            }
-            break;
-        }
         case Operation::Kind::TransitionObligation:
         {
             const Obligation* obligation = findObligation(current, operation.recordId);
@@ -1139,10 +1208,26 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             }
             break;
         }
+        case Operation::Kind::UpdateState:
+            if (operation.payload.empty())
+            {
+                return refuse(RefusalReason::InvariantFailed);
+            }
+            break;
         case Operation::Kind::AddEvidence:
             if (operation.title.empty() || operation.payload.empty())
             {
                 return refuse(RefusalReason::InvariantFailed);
+            }
+            break;
+        case Operation::Kind::UpsertProfile:
+            if (operation.title.empty() || operation.scope.empty() || operation.payload.empty())
+            {
+                return refuse(RefusalReason::InvariantFailed); // id + kind + summary required
+            }
+            if (findProfile(current, operation.title) != nullptr)
+            {
+                return refuse(RefusalReason::InvariantFailed); // profile ids never reused
             }
             break;
         case Operation::Kind::OpenConflict:
@@ -1198,6 +1283,14 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             {
                 return refuse(RefusalReason::InvariantFailed); // a view without profiles is invention
             }
+            // review §7: refs must RESOLVE in-snapshot, not merely be non-empty
+            for (const auto& ref : refs)
+            {
+                if (findProfile(current, ref) == nullptr)
+                {
+                    return refuse(RefusalReason::InvariantFailed); // dangling profile ref
+                }
+            }
             for (std::size_t i = 0; i < refs.size(); ++i)
             {
                 for (std::size_t k = i + 1; k < refs.size(); ++k)
@@ -1238,8 +1331,23 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
                                                 {},
                                                 Provenance { { transaction.handoffEvidenceRef } } });
             break;
+        case Operation::Kind::SupersedeDecision:
+            for (auto& decision : next.decisions)
+            {
+                if (decision.id == operation.recordId)
+                {
+                    decision.status = Lifecycle::Superseded; // history kept, status moves
+                    decision.supersededBy.push_back(operation.successorRecordId);
+                }
+                if (decision.id == operation.successorRecordId)
+                {
+                    decision.supersedes.push_back(operation.recordId); // reciprocal, acyclic
+                }
+            }
+            break;
         case Operation::Kind::AddMemory:
-            next.memory.push_back(MemoryRecord { MemoryRecord::Kind::Lesson,
+            // aux carries the MemoryRecord::Kind: negative knowledge is a floor
+            next.memory.push_back(MemoryRecord { static_cast<MemoryRecord::Kind>(operation.aux),
                                                  MemoryRecord::Status::Active,
                                                  operation.title,
                                                  operation.payload,
@@ -1262,23 +1370,6 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
                 }
             }
             break;
-        case Operation::Kind::UpdateState:
-            next.state.current = operation.payload;
-            break;
-        case Operation::Kind::SupersedeDecision:
-            for (auto& decision : next.decisions)
-            {
-                if (decision.id == operation.recordId)
-                {
-                    decision.status = Lifecycle::Superseded; // history kept, status moves
-                    decision.supersededBy.push_back(operation.successorRecordId);
-                }
-                if (decision.id == operation.successorRecordId)
-                {
-                    decision.supersedes.push_back(operation.recordId); // reciprocal, acyclic
-                }
-            }
-            break;
         case Operation::Kind::TransitionObligation:
             for (auto& obligation : next.obligations)
             {
@@ -1289,8 +1380,15 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
                 }
             }
             break;
+        case Operation::Kind::UpdateState:
+            next.state.current = operation.payload;
+            break;
         case Operation::Kind::AddEvidence:
             next.evidence.push_back(EvidenceRecord { operation.title, operation.payload });
+            break;
+        case Operation::Kind::UpsertProfile:
+            next.profiles.push_back(
+                ProfileRecord { operation.title, operation.scope, operation.payload });
             break;
         case Operation::Kind::OpenConflict:
             next.conflicts.push_back(Conflict { operation.title,
@@ -1313,7 +1411,9 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         {
             if (operation.aux == 1)
             { // retirement: the view is dropped by id (history stays in past snapshots)
-                std::erase_if(next.views, [&](const ViewSpec& view) { return view.id == operation.title; });
+                next.views.erase(std::remove_if(next.views.begin(), next.views.end(),
+                                                [&](const ViewSpec& view) { return view.id == operation.title; }),
+                                 next.views.end());
                 break;
             }
             ViewSpec view;
@@ -1339,7 +1439,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         }
     }
 
-    // gate 7.5: post-apply state coherence (pit P-15) — a nextBoundary that no
+    // gate 9: post-apply state coherence (pit P-15) — a nextBoundary that no
     // longer resolves to OPEN work refuses the whole transaction
     if (!next.state.nextBoundaryRef.empty())
     {
@@ -1358,14 +1458,12 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         }
     }
 
-    const Bytes newState = serializeImpl(next);
-    const ContentId id   = g_store->append(newState, entry->live->contentId);
-    if (id.empty())
-    {
-        // store-level CAS failed. With an idempotency key this is a LOST
-        // ACKNOWLEDGEMENT, not a known rollback: the commit may have landed
-        // before the failure. Record the receipt as OutcomeUnknown — dependent
-        // mutations stop; a same-key retry resolves to this receipt (DR-011).
+    // gate 10: store compareAndSwap on the REVISION — a CompareFailed is a
+    // definite rejection; an OutcomeUnknown is a lost acknowledgement and can
+    // never be claimed as a rollback (review §6)
+    const Bytes newState     = serializeImpl(next);
+    const auto storeReceipt  = g_store->compareAndSwap(entry->materialization->revision, newState);
+    const auto finishUnknown = [&]() {
         const Verdict unknown { Verdict::Outcome::OutcomeUnknown,
                                 RefusalReason::OutcomeUnresolved,
                                 {} };
@@ -1374,10 +1472,28 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             g_receipts[transaction.idempotencyKey] = Receipt { requestDigest, unknown };
         }
         return unknown;
+    };
+    if (storeReceipt.kind == StoreReceipt::Kind::CompareFailed)
+    {
+        return refuse(RefusalReason::StoreDiverged); // store-level CAS failed: fail closed
     }
-    entry->live->state     = std::make_shared<const Snapshot>(std::move(next));
-    entry->live->contentId = id; // the durable fencing token advances
-    const Verdict applied { Verdict::Outcome::Applied, RefusalReason::StoreDiverged, id };
+    if (storeReceipt.kind == StoreReceipt::Kind::OutcomeUnknown)
+    {
+        return finishUnknown();
+    }
+
+    // publish the SUCCESSOR MATERIALIZATION (review §2): minted immutable, the
+    // registry advances to it; the caller's pinned handle keeps its world
+    auto successor         = std::make_shared<Materialization>();
+    successor->state       = std::make_shared<const Snapshot>(std::move(next));
+    successor->digest      = DraftSnapshotDigest(newState);
+    successor->revision    = storeReceipt.revision;
+    successor->epoch       = entry->materialization->epoch; // same lineage, same lease
+    successor->quarantine  = entry->materialization->quarantine;
+    entry->materialization = successor;
+
+    const Verdict applied { Verdict::Outcome::Applied, RefusalReason::StoreDiverged,
+                            CognitionHandle { successor } };
     if (!transaction.idempotencyKey.empty())
     {
         g_receipts[transaction.idempotencyKey] = Receipt { requestDigest, applied };
@@ -1402,10 +1518,50 @@ Epoch QivenContext::currentEpoch()
     return g_epoch.load(); // lock-free sampling: cheap staleness pre-checks
 }
 
+bool QivenContext::RetireCognition(const CognitionHandle& handle)
+{
+    std::lock_guard lock(g_admission);
+    for (std::size_t i = 0; i < g_live.size(); ++i)
+    {
+        if (g_live[i].materialization == handle)
+        {
+            g_live.erase(g_live.begin() + static_cast<std::ptrdiff_t>(i));
+            return true; // destruction deferred until the last pin releases
+        }
+    }
+    return false;
+}
+
 std::shared_ptr<const Snapshot> QivenContext::CanonicalHead()
 {
     std::lock_guard lock(g_admission);
     return CanonicalHeadLocked();
+}
+
+std::shared_ptr<const Snapshot> QivenContext::CanonicalHeadLocked()
+{
+    if (!g_store)
+    {
+        return nullptr;
+    }
+    const auto head = g_store->head();
+    if (IsEmpty(head))
+    {
+        return nullptr;
+    }
+    for (const auto& entry : g_live)
+    {
+        if (entry.materialization->revision == head && entry.materialization->quarantine == QuarantineState::Promoted)
+        {
+            return entry.materialization->state; // fast path: the live canonical materialization
+        }
+    }
+    const auto parsed = deserializeImpl(g_store->materialize(head));
+    if (!parsed.ok)
+    {
+        return nullptr;
+    }
+    return std::make_shared<const Snapshot>(std::move(parsed.snapshot));
 }
 
 std::optional<ViewSpec> QivenContext::ResolveView(const CognitionHandle& handle,
@@ -1430,18 +1586,11 @@ std::optional<ViewSpec> QivenContext::ResolveView(const CognitionHandle& handle,
         {
             return reset(ResolveDiagnostic::Kind::InvalidRefs); // fails compilation (P-40)
         }
-        for (std::size_t i = 0; i < view.profileRefs.size(); ++i)
-        {
-            if (view.profileRefs[i].empty())
+        for (const auto& ref : view.profileRefs)
+        { // review §7: refs must RESOLVE in-snapshot
+            if (findProfile(*handle->state, ref) == nullptr)
             {
                 return reset(ResolveDiagnostic::Kind::InvalidRefs);
-            }
-            for (std::size_t k = i + 1; k < view.profileRefs.size(); ++k)
-            {
-                if (view.profileRefs[k] == view.profileRefs[i])
-                {
-                    return reset(ResolveDiagnostic::Kind::InvalidRefs); // duplicate ref
-                }
             }
         }
         if (diag)
@@ -1458,15 +1607,40 @@ ContextBundle QivenContext::BuildBundle(const CognitionHandle& handle, const Que
     QIVEN_ASSERT(handle != nullptr);
     const Snapshot& snapshot = *handle->state;
     ContextBundle bundle;
-    bundle.snapshot = handle->contentId;
+    bundle.snapshot = handle->revision;
 
-    // floors: mandatory inputs, present regardless of any budget (S1-R3, P-20)
+    // SEMANTIC floors: real content, present regardless of any budget
+    // (S1-R3, review §8: floor COUNT is not floor CONTENT)
     bundle.mandatoryInputs.push_back("governance: " + snapshot.governance.rootPrincipal);
-    bundle.mandatoryInputs.push_back("constitution: " + std::to_string(snapshot.constitution.articles.size()) + " articles bind");
+    for (const auto& article : snapshot.constitution.articles)
+    {
+        bundle.mandatoryInputs.push_back("constitution: " + article);
+    }
     bundle.mandatoryInputs.push_back("objective: " + snapshot.state.objective);
-    bundle.mandatoryInputs.push_back("candidate: " + snapshot.state.candidateRef);
-    bundle.mandatoryInputs.push_back("next boundary: " + snapshot.state.nextBoundaryRef);
-    bundle.mandatoryInputs.push_back("open conflicts: " + std::to_string(snapshot.conflicts.size()));
+    if (!snapshot.state.nextBoundaryRef.empty())
+    {
+        const Obligation* boundary =
+            findObligation(snapshot, std::stoll(snapshot.state.nextBoundaryRef));
+        if (boundary != nullptr)
+        {
+            bundle.mandatoryInputs.push_back("next boundary: obligation " + snapshot.state.nextBoundaryRef + ": " + boundary->statement);
+        }
+    }
+    for (const auto& conflict : snapshot.conflicts)
+    {
+        if (conflict.status == Conflict::Status::Open)
+        {
+            bundle.mandatoryInputs.push_back("OPEN CONFLICT " + conflict.id + ": " + conflict.description);
+        }
+    }
+    for (const auto& record : snapshot.memory)
+    { // negative knowledge is a floor: rejected alternatives surface where a
+      // pit is about to be re-dug (constitution #7)
+        if (record.kind == MemoryRecord::Kind::NegativeKnowledge && record.status == MemoryRecord::Status::Active)
+        {
+            bundle.mandatoryInputs.push_back("negative knowledge: " + record.statement);
+        }
+    }
 
     // protected constraints, derived verbatim from the policy table in cognition
     for (const auto& row : snapshot.policy.handoff)
@@ -1484,19 +1658,22 @@ ContextBundle QivenContext::BuildBundle(const CognitionHandle& handle, const Que
     bundle.protectedConstraints.push_back("typed handoffs are never verbally waived (ADR-0036)");
     bundle.protectedConstraints.push_back("unattended automation is read-only (ADR-0036)");
 
-    // candidates: typed, deterministic order, shrunk by the budget only;
-    // dropped material is explained (DR-007)
-    const std::size_t budget = query.tokenBudget == 0 ? 16 : query.tokenBudget;
+    // candidates: typed, deterministic order, shrunk by an approximate-TOKEN
+    // budget only (review §8: a candidate is not "1 token"); dropped material
+    // is explained (DR-007)
+    const std::size_t budget = query.tokenBudget == 0 ? 512 : query.tokenBudget;
     std::size_t used         = 0;
+    const auto estimate      = [](const std::string& text) { return (text.size() + 3) / 4; };
     for (const auto& decision : snapshot.decisions)
     {
         const BundleCandidate candidate { "decision", std::to_string(decision.id),
                                           decision.status == Lifecycle::Accepted ? "accepted: " + decision.title
                                                                                  : "lifecycle: " + decision.title };
-        if (used < budget)
+        const std::size_t cost = estimate(candidate.summary);
+        if (used + cost <= budget)
         {
             bundle.candidates.push_back(candidate);
-            ++used;
+            used += cost;
         }
         else
         {
@@ -1506,15 +1683,16 @@ ContextBundle QivenContext::BuildBundle(const CognitionHandle& handle, const Que
     }
     for (const auto& record : snapshot.memory)
     {
-        if (record.status != MemoryRecord::Status::Active)
+        if (record.status != MemoryRecord::Status::Active || record.kind == MemoryRecord::Kind::NegativeKnowledge)
         {
-            continue; // superseded memory leaves the default retrieval corpus
+            continue; // negative knowledge is a floor, not a candidate
         }
         const BundleCandidate candidate { "memory", record.title, record.statement };
-        if (used < budget)
+        const std::size_t cost = estimate(candidate.summary);
+        if (used + cost <= budget)
         {
             bundle.candidates.push_back(candidate);
-            ++used;
+            used += cost;
         }
         else
         {
@@ -1554,7 +1732,7 @@ std::string QivenContext::RenderBundle(const ContextBundle& bundle, OutputView v
     const std::string eol(1, '\n'); // newline as a char: heredocs eat escapes
     if (view == OutputView::Machine)
     { // deterministic flat rendering; parse this, never the human view
-        text += "snapshot=" + bundle.snapshot + eol;
+        text += "snapshot=" + bundle.snapshot.value + eol;
         for (const auto& floor : bundle.mandatoryInputs)
         {
             text += "floor|" + floor + eol;
@@ -1578,50 +1756,10 @@ std::string QivenContext::RenderBundle(const ContextBundle& bundle, OutputView v
         text += "authorization: not_granted" + eol; // without exception (ADR-0033 §6)
         return text;
     }
-    text += "[ RUN] bundle " + bundle.snapshot + eol;
+    text += "[ RUN] bundle " + bundle.snapshot.value + eol;
     text += "[ OK ] floors: " + std::to_string(bundle.mandatoryInputs.size()) + ", constraints: " + std::to_string(bundle.protectedConstraints.size()) + ", candidates: " + std::to_string(bundle.candidates.size()) + ", omissions: " + std::to_string(bundle.omissions.size()) + eol;
     text += "authorization: not_granted" + eol;
     return text;
-}
-
-std::shared_ptr<const Snapshot> QivenContext::CanonicalHeadLocked()
-{
-    if (!g_store)
-    {
-        return nullptr;
-    }
-    const auto head = g_store->head();
-    if (head.empty())
-    {
-        return nullptr;
-    }
-    for (const auto& entry : g_live)
-    {
-        if (entry.live->contentId == head && entry.live->quarantine == QuarantineState::Promoted)
-        {
-            return entry.live->state; // fast path: the live canonical materialization
-        }
-    }
-    const auto parsed = deserializeImpl(g_store->materialize(head));
-    if (!parsed.ok)
-    {
-        return nullptr;
-    }
-    return std::make_shared<const Snapshot>(std::move(parsed.snapshot));
-}
-
-bool QivenContext::RetireCognition(const CognitionHandle& handle)
-{
-    std::lock_guard lock(g_admission);
-    for (std::size_t i = 0; i < g_live.size(); ++i)
-    {
-        if (g_live[i].live == handle)
-        {
-            g_live.erase(g_live.begin() + static_cast<std::ptrdiff_t>(i));
-            return true; // destruction deferred until the last pin releases
-        }
-    }
-    return false;
 }
 
 bool QivenContext::IsContinueable(const Human* human, const LLMClientTool* client,
@@ -1632,7 +1770,17 @@ bool QivenContext::IsContinueable(const Human* human, const LLMClientTool* clien
     {
         return false;
     }
-    if (g_store == nullptr || !g_store->verify(handle->contentId))
+    // review §9: a whole-graph predicate validates the EDGES, not just that
+    // each node is individually healthy
+    if (client->pCurrentLLM.get() != llm || client->pTargetDevice.get() != device || llm->pCognition != handle)
+    {
+        return false; // the graph is not the graph it claims to be
+    }
+    if (client->binding.modelId != llm->name)
+    {
+        return false; // disclosure drift: the binding names another model (P-48)
+    }
+    if (g_store == nullptr || IsEmpty(handle->revision) || !g_store->verify(handle->revision))
     {
         return false; // state must be restorable from the store
     }

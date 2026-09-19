@@ -27,7 +27,57 @@ using ContentId   = std::string; // SHA-256 of canonical bytes (draft: FNV-1a he
                                  // (transport); a K4 artifact digest is another.
                                  // Cognition never parses it — compares and records.
 using Epoch = std::uint64_t;     // runtime fencing token (authority layer)
-using Yaml  = std::string;       // draft: raw yaml text; kernel will type these
+
+// THREE ORTHOGONAL IDENTITIES (review §3) — never share a value space again:
+struct SnapshotDigest
+{ // integrity identity of the canonical snapshot bytes
+    std::string value;
+};
+struct RevisionId
+{ // storage history identity — under a GitStore this is the commit OID
+    std::string value;
+};
+struct GrantId
+{ // runtime authority capability, minted by the authority plane only
+    std::string value;
+};
+[[nodiscard]] inline bool operator==(const SnapshotDigest& a, const SnapshotDigest& b)
+{
+    return a.value == b.value;
+}
+[[nodiscard]] inline bool operator!=(const SnapshotDigest& a, const SnapshotDigest& b)
+{
+    return !(a == b);
+}
+[[nodiscard]] inline bool operator==(const RevisionId& a, const RevisionId& b)
+{
+    return a.value == b.value;
+}
+[[nodiscard]] inline bool operator!=(const RevisionId& a, const RevisionId& b)
+{
+    return !(a == b);
+}
+[[nodiscard]] inline bool IsEmpty(const SnapshotDigest& d)
+{
+    return d.value.empty();
+}
+[[nodiscard]] inline bool IsEmpty(const RevisionId& r)
+{
+    return r.value.empty();
+}
+[[nodiscard]] inline bool IsEmpty(const GrantId& g)
+{
+    return g.value.empty();
+}
+[[nodiscard]] inline bool operator==(const GrantId& a, const GrantId& b)
+{
+    return a.value == b.value;
+}
+[[nodiscard]] inline bool operator!=(const GrantId& a, const GrantId& b)
+{
+    return !(a == b);
+}
+using Yaml = std::string; // draft: raw yaml text; kernel will type these
 
 enum class Lifecycle // decision lifecycle (record-lifecycle contract)
 {
@@ -208,6 +258,13 @@ struct StateView                 // compact current operational state, TYPED (pi
     Yaml roadmap;                // ordered plan items
 };
 
+struct ProfileRecord  // the in-snapshot resolution target for view profileRefs
+{                     // (review §7: refs must RESOLVE, not merely be non-empty)
+    ContentId id;     // e.g. "views/environments/jasonpc"
+    std::string kind; // environment / preference / workflow
+    std::string summary;
+};
+
 struct ViewSpec                           // DURABLE participant adaptation — context, not runtime (DR-008,
 {                                         // P-40: exports must carry it; integrity is gate-checked). The
                                           // live session binding stays a runtime parameter.
@@ -245,6 +302,7 @@ struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
     std::vector<Obligation> obligations;
     std::vector<EvidenceRecord> evidence;
     std::vector<Conflict> conflicts;
+    std::vector<ProfileRecord> profiles; // view profileRefs resolve against these
     std::vector<ViewSpec> views;
 };
 } // namespace qiven::context

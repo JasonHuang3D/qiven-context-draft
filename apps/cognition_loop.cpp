@@ -16,7 +16,7 @@ namespace
 {
 AuthenticatedActor demoActor()
 {
-    return AuthenticatedActor { "github:JasonHuang3D", Role::Worker, "glm-5.3-flash",
+    return AuthenticatedActor { "github:JasonHuang3D", Role::Worker, "GLM-5.3-Flash",
                                 "GLM-5.3-Flash", "max" };
 }
 
@@ -40,7 +40,7 @@ int main()
     boot.kind      = CognitionSourceKind::CanonicalRemote;
     const auto cog = QivenContext::CreateCognition(boot);
     std::printf("[ OK ] boot        epoch=%llu head=%s\n",
-                static_cast<unsigned long long>(cog->epoch), cog->contentId.c_str());
+                static_cast<unsigned long long>(cog->epoch), cog->revision.value.c_str());
 
     // participants: a pure pointer graph — every change below is a rebind (R3)
     auto llm            = std::make_shared<LLM>();
@@ -59,7 +59,7 @@ int main()
     client->name          = "zcode-desktop";
     client->pCurrentLLM   = llm;
     client->pTargetDevice = device;
-    client->binding       = ParticipantBinding { Role::Worker, "glm-5.3-flash" };
+    client->binding       = ParticipantBinding { Role::Worker, "GLM-5.3-Flash" };
 
     auto human               = std::make_shared<Human>();
     human->name              = "Jason";
@@ -91,6 +91,7 @@ int main()
         transaction.handoffEvidenceRef = "PR-record review";
         H2Evidence evidence;
         evidence.reviewer            = "github:JasonHuang3D";
+        evidence.reviewerBinding     = "jason-brother-glm5-3"; // NOT the author binding
         evidence.reviewRef           = "brother-review";
         evidence.reviewedDeltaDigest = DigestOperations(transaction.operations);
         transaction.h2               = evidence;

@@ -1,9 +1,11 @@
 // ============================================================================
 // store_contract — ICognitionStore is the ENTIRE persistence requirement.
 // Any storage with incremental append/read suffices; git is one implementation.
+// Typed receipts: a CompareFailed and a lost acknowledgement are different
+// worlds (review §6); revisions are the CAS token (review §3).
 // ============================================================================
 
-#include <qiven/context/persistence.hpp>
+#include <qiven/context/context.hpp>
 
 #include "detail/check.hpp"
 
@@ -17,39 +19,47 @@ int main()
 
     // incremental write: genesis accepts an empty base on an empty store
     const Bytes state1 { std::byte { 'A' } };
-    const ContentId id1 = store.append(state1, {});
-    QCD_CHECK(!id1.empty());
-    QCD_CHECK(id1 == DraftContentId(state1)); // ContentId = digest of the bytes
+    const auto receipt1 = store.compareAndSwap(RevisionId {}, state1);
+    QCD_CHECK(receipt1.kind == StoreReceipt::Kind::Committed);
+    const RevisionId id1 = receipt1.revision;
+    QCD_CHECK(!IsEmpty(id1));
     QCD_CHECK(store.verify(id1));
     QCD_CHECK(store.materialize(id1) == state1);
     QCD_CHECK(store.head() == id1);
 
-    // divergence: an append must chain onto the current head
+    // typed CAS rejection: a wrong base is DEFINITELY not committed (world A)
     const Bytes state2 { std::byte { 'B' } };
-    QCD_CHECK(store.append(state2, ContentId { "draft-ffffffffffffffff" }).empty());
+    const auto rejected = store.compareAndSwap(RevisionId { "rev-ffffffffffffffff" }, state2);
+    QCD_CHECK(rejected.kind == StoreReceipt::Kind::CompareFailed);
+    QCD_CHECK(store.head() == id1); // nothing landed
 
-    const ContentId id2 = store.append(state2, id1);
-    QCD_CHECK(!id2.empty() && id2 != id1);
+    // a commit chained onto the head succeeds
+    const auto receipt2 = store.compareAndSwap(id1, state2);
+    QCD_CHECK(receipt2.kind == StoreReceipt::Kind::Committed);
+    const RevisionId id2 = receipt2.revision;
+    QCD_CHECK(id2 != id1);
     QCD_CHECK(store.materialize(id2) == state2);
     QCD_CHECK(store.head() == id2);
 
-    // incremental read: the receiver must be able to materialize the target
-    QCD_CHECK(store.readDelta(id1, id2) == state2);
-    QCD_CHECK(!store.verify(ContentId { "draft-0000000000000000" }));
+    // revisions chain HISTORY, not content: the same bytes under a different
+    // parent mint a different revision (this is what lets a GitStore exist)
+    QCD_CHECK(receipt1.revision != receipt2.revision);
 
-    // idempotent re-append of the current head
-    QCD_CHECK(store.append(state2, id2) == id2);
+    // the revision contract folds incremental reads into materialize:
+    // the receiver materializes the target; a real transport encodes the diff
+    QCD_CHECK(!store.verify(RevisionId { "rev-0000000000000000" }));
 
-    // content addressing: identical bytes, identical identity
-    QCD_CHECK(DraftContentId(state2) == DraftContentId(state2));
-    QCD_CHECK(DraftContentId(state1) != DraftContentId(state2));
+    // idempotent re-commit of the current head
+    const auto again = store.compareAndSwap(id2, state2);
+    QCD_CHECK(again.kind == StoreReceipt::Kind::Committed);
+    QCD_CHECK(again.revision == id2);
 
     // GitStore is a documented sketch, not an implementation
     GitStore git;
     bool threw = false;
     try
     {
-        static_cast<void>(git.append(state1, {}));
+        static_cast<void>(git.compareAndSwap(RevisionId {}, state1));
     }
     catch (const std::logic_error&)
     {

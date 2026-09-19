@@ -3,19 +3,24 @@
 // ============================================================================
 // persistence.hpp — PART 2: store contract, materialization, gated service
 //
-// v3 phase 1 (DR-001/002/003/004/009/010):
-//  - Snapshot is immutable; Materialization carries runtime identity and
-//    authority. Participants hold shared_ptr<const Materialization> — the
-//    LLM never holds a mutable reference to cognition, as a type shape.
-//  - Writes take an ExecutionGrant minted by the in-process authority: one
-//    active grant chain-wide (a second acquire is refused fail-closed — the
-//    split-brain pit), base CAS (durable fencing), the policy table, and
-//    content-bound H2 evidence. Every refusal is a typed Verdict whose reason
-//    maps to a recovery rule stored IN cognition.
-//  - Untrusted deserialization fails closed with typed errors — never asserts
-//    (which compile away in Release).
-//  - epoch fences the writer lease (DR-010); re-materializing for reading
-//    never revokes a writer.
+// v3 phase 2C (semantic closure, per the 2026-09-20 review):
+//  - THREE ORTHOGONAL IDENTITIES (review §3): SnapshotDigest (integrity of the
+//    canonical snapshot bytes), RevisionId (storage history identity — under a
+//    GitStore this is the commit OID), GrantId (runtime authority capability).
+//    They are distinct types and must never share a value space again.
+//  - IMMUTABLE MATERIALIZATIONS (review §2): a write mints a SUCCESSOR
+//    Materialization; nothing mutates a published one. Participants pinning a
+//    handle see one consistent world for their whole Work cycle — the alias
+//    data race between ReadFromCognition and the publish path is gone.
+//  - TYPED STORE RECEIPTS (review §6): compareAndSwap returns
+//    Committed / CompareFailed / OutcomeUnknown — a CAS failure (definitely
+//    not committed) and a lost acknowledgement (possibly committed) are
+//    different worlds and can never be conflated again.
+//  - UNFORGEABLE GRANTS (review §4): ExecutionGrant is a move-only minted
+//    capability with a private constructor; assembling a value-equal forgery
+//    is not expressible in the type system.
+//  - Idempotency receipts (DR-011) remain IN-PROCESS in this draft; only a
+//    restart-capable adapter may claim durable receipts (DR-011 wording).
 // ============================================================================
 
 #include <qiven/context/cognition.hpp>
@@ -46,51 +51,69 @@ using Bytes = std::vector<std::byte>; // draft serialization payload (versioned 
 // deterministic for the same snapshot and serialization version
 [[nodiscard]] Bytes SerializeSnapshot(const Snapshot& snapshot);
 
-// --- store contract: the ENTIRE persistence requirement ---------------------
+// integrity identity of canonical snapshot bytes (review §3)
+[[nodiscard]] SnapshotDigest DraftSnapshotDigest(const Bytes& stateBytes);
+
+// --- store contract: the ENTIRE persistence requirement ----------------------
+
+struct StoreReceipt // review §6: a CAS failure and a lost acknowledgement are
+{                   // different worlds; the contract types them separately
+    enum class Kind
+    {
+        Committed,      // revision appended; `revision` is valid
+        CompareFailed,  // base != head: definitely NOT committed
+        OutcomeUnknown, // possibly committed; acknowledgement lost
+    };
+    Kind kind { Kind::CompareFailed };
+    RevisionId revision; // meaningful when Committed
+};
 
 class ICognitionStore
 {
 public:
     virtual ~ICognitionStore() = default;
 
-    // incremental write: full new state, chained onto `base` (git: commit)
-    // returns the content id of the appended state; empty ContentId on reject
-    [[nodiscard]] virtual ContentId append(const Bytes& stateBytes, const ContentId& base) = 0;
+    // compare-and-swap on the REVISION (storage identity): append the state
+    // chained onto `base`. CompareFailed means definitely not committed;
+    // OutcomeUnknown means possibly committed with the acknowledgement lost.
+    [[nodiscard]] virtual StoreReceipt compareAndSwap(const RevisionId& base,
+                                                      const Bytes& stateBytes) = 0;
 
-    // read the state at a content id (git: checkout / cat-file)
-    [[nodiscard]] virtual Bytes materialize(const ContentId& id) const = 0;
+    // read the state at a revision (git: checkout / cat-file)
+    [[nodiscard]] virtual Bytes materialize(const RevisionId& revision) const = 0;
 
-    // incremental read between two content ids (git: fetch/pack — transport
-    // optimization; the contract only requires `target` to be materializable)
-    [[nodiscard]] virtual Bytes readDelta(const ContentId& base, const ContentId& target) const = 0;
+    [[nodiscard]] virtual bool verify(const RevisionId& revision) const = 0; // git: cat-file -e
 
-    [[nodiscard]] virtual bool verify(const ContentId& id) const = 0; // git: cat-file -e
-
-    [[nodiscard]] virtual ContentId head() const = 0;
+    [[nodiscard]] virtual RevisionId head() const = 0;
 };
 
 // in-memory reference implementation (proves the contract; used by tests/demo)
 class MemoryStore final : public ICognitionStore
 {
 public:
-    [[nodiscard]] ContentId append(const Bytes& stateBytes, const ContentId& base) override;
-    [[nodiscard]] Bytes materialize(const ContentId& id) const override;
-    [[nodiscard]] Bytes readDelta(const ContentId& base, const ContentId& target) const override;
-    [[nodiscard]] bool verify(const ContentId& id) const override;
-    [[nodiscard]] ContentId head() const override;
+    [[nodiscard]] StoreReceipt compareAndSwap(const RevisionId& base, const Bytes& stateBytes) override;
+    [[nodiscard]] Bytes materialize(const RevisionId& revision) const override;
+    [[nodiscard]] bool verify(const RevisionId& revision) const override;
+    [[nodiscard]] RevisionId head() const override;
 
 private:
-    std::vector<std::pair<ContentId, Bytes>> states_; // linear history, genesis first
-    ContentId head_ {};
+    std::vector<std::pair<RevisionId, Bytes>> revisions_; // linear history, genesis first
+    RevisionId head_ {};
 };
 
 // git implementation — DOCUMENTED SKETCH, deliberately not implemented here.
 // The store contract is proven by MemoryStore; this class records the mapping.
+// With RevisionId as the CAS token the mapping is now implementable:
 //
-//   append(state, base)     -> git commit (parent = head; ContentId = commit SHA)
-//   materialize(id)         -> git checkout / cat-file at that SHA
-//   readDelta(base, target) -> git fetch/pack between two SHAs
-//   verify(id)              -> git cat-file -e
+//   compareAndSwap(base, bytes) -> git commit with parent = base (RevisionId =
+//                                  commit OID); CompareFailed = non-fast-forward
+//   materialize(revision)       -> git checkout / cat-file at that OID
+//   verify(revision)            -> git cat-file -e
+//   head()                      -> rev-parse HEAD
+//
+// (The v3 phase 1 contract passed the SNAPSHOT DIGEST as the parent token,
+// which no real storage can chain on — review §3. This sketch is why the two
+// identities are now separate types.)
 //
 // Layered transport ceremonies, NOT part of the store contract:
 //   push/pull               -> replica sync between devices
@@ -100,14 +123,13 @@ private:
 class GitStore final : public ICognitionStore
 {
 public:
-    [[nodiscard]] ContentId append(const Bytes& stateBytes, const ContentId& base) override;
-    [[nodiscard]] Bytes materialize(const ContentId& id) const override;
-    [[nodiscard]] Bytes readDelta(const ContentId& base, const ContentId& target) const override;
-    [[nodiscard]] bool verify(const ContentId& id) const override;
-    [[nodiscard]] ContentId head() const override;
+    [[nodiscard]] StoreReceipt compareAndSwap(const RevisionId& base, const Bytes& stateBytes) override;
+    [[nodiscard]] Bytes materialize(const RevisionId& revision) const override;
+    [[nodiscard]] bool verify(const RevisionId& revision) const override;
+    [[nodiscard]] RevisionId head() const override;
 };
 
-// --- materialization (DR-001 / DR-010) ---------------------------------------
+// --- materialization (DR-001 / DR-010 / review §2) ----------------------------
 
 enum class QuarantineState
 {
@@ -117,11 +139,16 @@ enum class QuarantineState
     Promoted,         // authoritative via the governed promotion operation only
 };
 
+// A Materialization is IMMUTABLE once minted (review §2): a write produces a
+// SUCCESSOR materialization; nothing mutates a published one. A participant
+// pinning a handle therefore sees one consistent world for its whole Work
+// cycle, and readers never race the publish path.
 struct Materialization
 {
     std::shared_ptr<const Snapshot> state; // immutable value tree
-    ContentId contentId;                   // durable fencing token
-    Epoch epoch { 0 };                     // runtime fencing token (writer lease)
+    SnapshotDigest digest;                 // integrity identity of the state bytes
+    RevisionId revision;                   // storage history identity (store CAS token)
+    Epoch epoch { 0 };                     // runtime fencing token (writer lease lineage)
     QuarantineState quarantine { QuarantineState::Isolated };
 };
 using CognitionHandle = std::shared_ptr<const Materialization>;
@@ -150,7 +177,7 @@ struct DeserializeResult
     DeserializeError error;
 };
 
-// --- work modes, actors, grants (DR-003) --------------------------------------
+// --- work modes, actors, grants (DR-003 / review §4) ---------------------------
 
 enum class WorkMode
 {
@@ -172,17 +199,36 @@ struct AuthenticatedActor
     return a.principal == b.principal && a.role == b.role && a.binding == b.binding && a.servingModel == b.servingModel && a.reasoning == b.reasoning;
 }
 
-struct ExecutionGrant
+// UNFORGEABLE LEASE (review §4): private constructor, move-only, no default.
+// A grant is minted only by QivenContext::AcquireGrant and carries a minted
+// GrantId the service validates against its active lease — assembling a
+// value-equal forgery is not expressible in the type system.
+class ExecutionGrant
 {
-    Epoch epoch { 0 };
-    PrincipalId principal;
-    WorkMode mode { WorkMode::SupervisedForeground };
-};
+public:
+    ExecutionGrant(const ExecutionGrant&)            = delete;
+    ExecutionGrant& operator=(const ExecutionGrant&) = delete;
+    ExecutionGrant(ExecutionGrant&&)                 = default;
+    ExecutionGrant& operator=(ExecutionGrant&&)      = default;
+    ~ExecutionGrant()                                = default;
 
-[[nodiscard]] inline bool operator==(const ExecutionGrant& a, const ExecutionGrant& b)
-{
-    return a.epoch == b.epoch && a.principal == b.principal && a.mode == b.mode;
-}
+    [[nodiscard]] const GrantId& id() const
+    {
+        return id_;
+    }
+    [[nodiscard]] WorkMode mode() const
+    {
+        return mode_;
+    }
+
+private:
+    friend class QivenContext;
+    ExecutionGrant(GrantId id, Epoch epoch, PrincipalId principal, WorkMode mode);
+    GrantId id_;
+    Epoch epoch_ { 0 };
+    PrincipalId principal_;
+    WorkMode mode_ { WorkMode::SupervisedForeground };
+};
 
 // identity port: verification happens here, never by caller assertion. Ports
 // are called WITH the governance snapshot the service supplies and NEVER
@@ -213,6 +259,7 @@ struct Operation
         TransitionObligation, // ObligationWrite: Done/Cancelled/Superseded
         UpdateState,          // StateUpdate
         AddEvidence,          // EvidenceWrite
+        UpsertProfile,        // EvidenceWrite: profile records views resolve against
         OpenConflict,         // ConflictWrite
         ResolveConflict,      // ConflictWrite
         AmendViewSpec,        // EvidenceWrite-class: durable view adaptation
@@ -222,22 +269,24 @@ struct Operation
     std::int64_t recordId { 0 };          // decision/obligation/conflict id, per kind
     std::int64_t successorRecordId { 0 }; // supersede/transition successor
     std::uint8_t aux { 0 };               // TransitionObligation: Obligation::Status
-    std::string scope;                    // conflict scope (empty = global)
+    std::string scope;                    // conflict scope (empty = global); view agent:human
     std::string title;
     std::string payload;
-    std::string provenanceRef; // required for AddMemory (constitution 9)
+    std::string provenanceRef; // required for AddMemory (constitution 9);
+                               // AmendViewSpec: comma-separated profile refs
 };
 
-struct H2Evidence // content-bound review evidence (DR-004, pit P-05)
-{
+struct H2Evidence                  // content-bound AND authority-bound review evidence
+{                                  // (DR-004 + review §5: reviewer identity, binding and authority)
     ContentId reviewedDeltaDigest; // over the serialized ordered operations
-    PrincipalId reviewer;          // the delegated reviewer's principal
+    PrincipalId reviewer;          // the reviewer's principal (verified at the gate)
+    std::string reviewerBinding;   // the reviewer's model-instance binding
     std::string reviewRef;         // transport pointer: PR record / audit id
 };
 
 struct ContextTransaction
 {
-    ContentId base;                    // durable fencing token: the state my thinking assumed
+    RevisionId base;                   // durable fencing token: the revision my thinking assumed
     std::vector<Operation> operations; // atomic; validated as a whole, applied as a whole
     std::string handoffEvidenceRef;    // transport pointer (PR record / audit id)
     std::optional<H2Evidence> h2;      // present iff the policy table requires it
@@ -256,14 +305,15 @@ struct Verdict // the write gate's typed outcome (DR-002); a bool erases the
     {
         Applied,
         Refused,
-        OutcomeUnknown, // produced by Phase 2 receipts; reserved here
+        OutcomeUnknown, // possibly committed; receipt recorded, state not advanced
     };
     Outcome outcome { Outcome::Refused };
     RefusalReason reason { RefusalReason::StoreDiverged };
-    ContentId successorId; // meaningful when Applied
+    CognitionHandle successor; // the SUCCESSOR MATERIALIZATION when Applied
+                               // (review §2: successors are minted, not mutated in)
 };
 
-// --- read side (Bundle lands in Phase 2; K5 stays transport-only) ------------
+// --- read side: view resolution, bundles, output views (DR-007 / DR-008) ------
 
 enum class CognitionSourceKind
 {
@@ -275,8 +325,7 @@ enum class CognitionSourceKind
 struct CognitionSource
 {
     CognitionSourceKind kind { CognitionSourceKind::CanonicalRemote };
-    ContentId contentId;      // addressed by content — NOT necessarily a commit;
-                              // empty = store head (genesis when store is empty)
+    RevisionId revision;      // addressed by REVISION (storage identity); empty = head
     Bytes inlineBytes;        // HandoffArtifact: the artifact payload itself
     ContentId expectedDigest; // artifact integrity: when non-empty, the payload
                               // must hash to this id BEFORE deserialization
@@ -286,12 +335,12 @@ struct CognitionSource
 struct Query
 {
     std::string taskScope;      // mandatory inputs always included (BOOTSTRAP set)
-    std::size_t tokenBudget {}; // Bundle domain (phase 2); K5 is transport-only
+    std::size_t tokenBudget {}; // approximate-token budget for CANDIDATES only
 };
 
 using Data = Bytes; // full materialized snapshot for thinking (ADR-0033)
 
-// --- the read plane: view resolution and the ContextBundle (DR-007/DR-008) ----
+// --- the read plane: view resolution and the ContextBundle (DR-007 / DR-008) ----
 
 enum class OutputView
 {
@@ -306,13 +355,11 @@ struct ResolveDiagnostic
         None,        // resolved
         NotFound,    // unknown view id: fall back to the identity-independent context,
                      // never invent a participant combination (pit P-41)
-        InvalidRefs, // empty or duplicated profile refs fail compilation (pit P-40)
+        InvalidRefs, // empty/duplicated refs or refs that do not resolve in-snapshot
+                     // fail compilation (pit P-40)
     };
     Kind kind { Kind::None };
 };
-
-// --- the ContextBundle: floors and constraints are non-negotiable, the budget
-// shrinks candidates only (DR-007); a bundle is evidence, never permission ----
 
 struct BundleCandidate
 {
@@ -341,8 +388,8 @@ struct BundleOmission
 
 struct ContextBundle
 {
-    ContentId snapshot;                            // one snapshot; never mixed
-    std::vector<std::string> mandatoryInputs;      // the S1-R3 floors
+    RevisionId snapshot;                           // one revision; never mixed
+    std::vector<std::string> mandatoryInputs;      // SEMANTIC floors: real content
     std::vector<std::string> protectedConstraints; // verbatim; never elided
     std::vector<BundleCandidate> candidates;       // typed candidates, never truth
     std::vector<ObligationEvaluation> obligations; // three-valued (ADR-0033 §6)
@@ -367,33 +414,36 @@ public:
     static CognitionHandle CreateCognition(const CognitionSource& source,
                                            DeserializeError* err = nullptr);
 
-    // full snapshot for thinking; the typed Bundle with floors lands in Phase 2
+    // full snapshot for thinking (immutable — race-free by construction)
     static Data ReadFromCognition(const CognitionHandle& handle, const Query& query);
 
     // single-writer lease: exactly one active grant chain-wide. A second
     // acquire while one is held is refused fail-closed (pit P-01) — competing
     // flows are quarantined, never queued. Identity is verified at acquire
-    // AND re-checked at write (ADR-0033 section 4).
+    // AND re-checked at write (ADR-0033 section 4). The minted GrantId is the
+    // only capability the gate accepts (review §4).
     [[nodiscard]] static std::optional<ExecutionGrant> AcquireGrant(const AuthenticatedActor& actor,
                                                                     WorkMode mode);
     static void ReleaseGrant(const ExecutionGrant& grant);
 
     // the gated write. Gate order is normative and tested:
     //   0. handle known + non-quarantined          -> GovernanceDenied
-    //   1. grant is the active lease               -> GrantRefused
+    //   1. grant id is the active lease            -> GrantRefused
     //   2. actor re-verified                       -> UnverifiedActor
     //   3. idempotency key resolution              -> replay original verdict /
     //                                                 KeyConflict
     //   4. unattended + mutating                   -> UnattendedMutation
-    //   5. base CAS                                -> StaleBase
-    //   6. policy table + content-bound H2         -> HandoffMissing / HandoffInvalid
+    //   5. base revision CAS                       -> StaleBase
+    //   6. policy table + authority-bound H2       -> HandoffMissing / HandoffInvalid
     //                                                 / GovernanceDenied
-    //   7. invariants (whole transaction)          -> InvariantFailed
-    //   8. apply atomically; store CAS             -> StoreDiverged
+    //   7. open-conflict scope intersection        -> ConflictUnresolved
+    //   8. invariants (whole transaction)          -> InvariantFailed
+    //   9. post-apply state coherence              -> InvariantFailed
+    //  10. store compareAndSwap                    -> StoreDiverged (CompareFailed)
+    //                                                 / OutcomeUnknown (lost ack)
     // An empty operations list is an ordinary turn: Applied, nothing stored.
-    // A non-empty key records a durable receipt; a lost store acknowledgement
-    // yields Verdict{OutcomeUnknown, OutcomeUnresolved} — never a rollback
-    // claim — and the same key resolves to the receipt until it is replaced.
+    // On Applied the SUCCESSOR MATERIALIZATION is returned and the registry
+    // advances to it — the caller's old handle keeps its pinned world.
     static Verdict WriteToCognition(const CognitionHandle& handle,
                                     const ContextTransaction& transaction,
                                     const ExecutionGrant& grant);
@@ -404,8 +454,7 @@ public:
 
     // view resolution: a pure read-time transformation. Unknown ids fall back
     // to the identity-independent context (nullopt + NotFound) — a participant
-    // combination is never invented (S1-R2); invalid refs fail compilation
-    // (InvalidRefs).
+    // combination is never invented (S1-R2); invalid refs fail compilation.
     [[nodiscard]] static std::optional<ViewSpec> ResolveView(const CognitionHandle& handle,
                                                              const std::string& viewId,
                                                              ResolveDiagnostic* diag = nullptr);
@@ -427,7 +476,10 @@ public:
     // governance; empty principal on an unreadable store
     [[nodiscard]] static std::shared_ptr<const Snapshot> CanonicalHead();
 
-    // the ONLY whole-graph predicate; evaluated by the loop, never by a participant
+    // the ONLY whole-graph predicate; validated for EDGE consistency too —
+    // the client must actually reference the llm and device passed in, the
+    // llm must be bound to this handle, and the binding disclosure must match
+    // the LLM identity (review §9/§10)
     static bool IsContinueable(const Human* h, const LLMClientTool* c, const Device* d,
                                const LLM* l, const CognitionHandle& handle);
 
@@ -436,7 +488,7 @@ public:
 private:
     struct Registry
     {
-        std::shared_ptr<Materialization> live; // service-owned mutable view
+        CognitionHandle materialization; // IMMUTABLE; replaced on commit, never mutated
     };
     // canonical head snapshot; caller MUST hold g_admission (ports receive it
     // as context — P-42: ports never re-enter the service while it is locked)
@@ -446,13 +498,15 @@ private:
     static std::shared_ptr<ICognitionStore> g_store;
     static std::shared_ptr<IIdentityVerifier> g_identity;
     static std::vector<Registry> g_live; // live materializations, epoch-indexed
-    static std::optional<ExecutionGrant> g_activeGrant;
+    static GrantId g_activeGrantId;      // the minted id of the active lease
     static AuthenticatedActor g_grantActor;
     struct Receipt
     {
         std::string requestDigest; // digest of the complete request (base, ops, evidence)
         Verdict outcome;           // the durable outcome the key resolves to
     };
-    static std::map<std::string, Receipt> g_receipts; // key -> receipt (draft: in-process)
+    static std::map<std::string, Receipt> g_receipts; // IN-PROCESS idempotency receipts
+                                                      // (DR-011: durable receipts require
+                                                      // a restart-capable adapter)
 };
 } // namespace qiven::context
