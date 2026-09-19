@@ -1762,6 +1762,64 @@ std::string QivenContext::RenderBundle(const ContextBundle& bundle, OutputView v
     return text;
 }
 
+CognitionHandle QivenContext::VerifyRestored(const CognitionHandle& handle, const AuthenticatedActor& actor)
+{
+    std::lock_guard lock(g_admission);
+    if (!g_identity)
+    {
+        g_identity = std::make_shared<RootPrincipalVerifier>();
+    }
+    const auto governance = CanonicalHeadLocked();
+    if (!governance || !g_identity->verify(actor, *governance))
+    {
+        return nullptr; // only the governance principal touches the state machine
+    }
+    for (auto& entry : g_live)
+    {
+        if (entry.materialization == handle)
+        {
+            if (entry.materialization->quarantine != QuarantineState::Isolated)
+            {
+                return nullptr; // VerifyRestored applies to restored artifacts only
+            }
+            auto verified         = std::make_shared<Materialization>(*entry.materialization);
+            verified->quarantine  = QuarantineState::Verified; // minted successor, not mutation
+            entry.materialization = CognitionHandle { verified };
+            return CognitionHandle { verified };
+        }
+    }
+    return nullptr;
+}
+
+CognitionHandle QivenContext::PromoteAuthority(const CognitionHandle& handle, const AuthenticatedActor& actor)
+{
+    std::lock_guard lock(g_admission);
+    if (!g_identity)
+    {
+        g_identity = std::make_shared<RootPrincipalVerifier>();
+    }
+    const auto governance = CanonicalHeadLocked();
+    if (!governance || !g_identity->verify(actor, *governance))
+    {
+        return nullptr; // promotion is a governed act by the root principal only
+    }
+    for (auto& entry : g_live)
+    {
+        if (entry.materialization == handle)
+        {
+            if (entry.materialization->quarantine != QuarantineState::AuthorityPending)
+            {
+                return nullptr; // AuthorityPending is only reachable via a canonical cutover
+            }
+            auto promoted         = std::make_shared<Materialization>(*entry.materialization);
+            promoted->quarantine  = QuarantineState::Promoted;
+            entry.materialization = CognitionHandle { promoted };
+            return CognitionHandle { promoted };
+        }
+    }
+    return nullptr;
+}
+
 bool QivenContext::IsContinueable(const Human* human, const LLMClientTool* client,
                                   const Device* device, const LLM* llm,
                                   const CognitionHandle& handle)
