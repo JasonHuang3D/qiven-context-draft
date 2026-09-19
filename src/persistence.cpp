@@ -4,7 +4,7 @@
 
 #include <qiven/context/persistence.hpp>
 
-#include <qiven/context/runtime.hpp>   // IsContinueable inspects participant fields
+#include <qiven/context/runtime.hpp> // IsContinueable inspects participant fields
 
 #include <qiven/contracts.hpp>
 
@@ -23,22 +23,24 @@ constexpr std::uint8_t kSerializationVersion = 1;
 
 void putU8(Bytes& bytes, std::uint8_t value)
 {
-    bytes.push_back(std::byte{value});
+    bytes.push_back(std::byte { value });
 }
 
 void putU32(Bytes& bytes, std::uint32_t value)
 {
-    for (unsigned shift = 0; shift < 32; shift += 8) {
+    for (unsigned shift = 0; shift < 32; shift += 8)
+    {
         const auto byte = static_cast<unsigned char>((value >> shift) & 0xFFU);
-        bytes.push_back(std::byte{byte});
+        bytes.push_back(std::byte { byte });
     }
 }
 
 void putU64(Bytes& bytes, std::uint64_t value)
 {
-    for (unsigned shift = 0; shift < 64; shift += 8) {
+    for (unsigned shift = 0; shift < 64; shift += 8)
+    {
         const auto byte = static_cast<unsigned char>((value >> shift) & 0xFFU);
-        bytes.push_back(std::byte{byte});
+        bytes.push_back(std::byte { byte });
     }
 }
 
@@ -52,8 +54,9 @@ void putI64(Bytes& bytes, std::int64_t value)
 void putStr(Bytes& bytes, const std::string& value)
 {
     putU32(bytes, static_cast<std::uint32_t>(value.size()));
-    for (const char ch : value) {
-        bytes.push_back(std::byte{static_cast<unsigned char>(ch)});
+    for (const char ch : value)
+    {
+        bytes.push_back(std::byte { static_cast<unsigned char>(ch) });
     }
 }
 
@@ -67,7 +70,8 @@ std::uint32_t getU32(const Bytes& bytes, std::size_t& offset)
 {
     QIVEN_ASSERT(offset + 4 <= bytes.size());
     std::uint32_t value = 0;
-    for (unsigned shift = 0; shift < 32; shift += 8) {
+    for (unsigned shift = 0; shift < 32; shift += 8)
+    {
         value |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(bytes[offset++])) << shift;
     }
     return value;
@@ -77,7 +81,8 @@ std::uint64_t getU64(const Bytes& bytes, std::size_t& offset)
 {
     QIVEN_ASSERT(offset + 8 <= bytes.size());
     std::uint64_t value = 0;
-    for (unsigned shift = 0; shift < 64; shift += 8) {
+    for (unsigned shift = 0; shift < 64; shift += 8)
+    {
         value |= static_cast<std::uint64_t>(std::to_integer<unsigned char>(bytes[offset++])) << shift;
     }
     return value;
@@ -86,7 +91,7 @@ std::uint64_t getU64(const Bytes& bytes, std::size_t& offset)
 std::int64_t getI64(const Bytes& bytes, std::size_t& offset)
 {
     const std::uint64_t bits = getU64(bytes, offset);
-    std::int64_t value = 0;
+    std::int64_t value       = 0;
     std::memcpy(&value, &bits, sizeof value);
     return value;
 }
@@ -97,7 +102,8 @@ std::string getStr(const Bytes& bytes, std::size_t& offset)
     QIVEN_ASSERT(offset + length <= bytes.size());
     std::string value;
     value.resize(length);
-    if (length > 0) {
+    if (length > 0)
+    {
         std::memcpy(value.data(), bytes.data() + offset, length);
     }
     offset += length;
@@ -114,12 +120,14 @@ Bytes serializeImpl(const LLMCognition& cognition)
 
     putStr(bytes, cognition.governance.rootPrincipal);
     putU32(bytes, static_cast<std::uint32_t>(cognition.constitution.articles.size()));
-    for (const auto& article : cognition.constitution.articles) {
+    for (const auto& article : cognition.constitution.articles)
+    {
         putStr(bytes, article);
     }
 
     putU32(bytes, static_cast<std::uint32_t>(cognition.collaborations.size()));
-    for (const auto& rule : cognition.collaborations) {
+    for (const auto& rule : cognition.collaborations)
+    {
         putU8(bytes, static_cast<std::uint8_t>(rule.domain));
         putStr(bytes, rule.rule);
     }
@@ -130,39 +138,46 @@ Bytes serializeImpl(const LLMCognition& cognition)
     putStr(bytes, cognition.state.roadmap);
 
     putU32(bytes, static_cast<std::uint32_t>(cognition.decisions.size()));
-    for (const auto& decision : cognition.decisions) {
+    for (const auto& decision : cognition.decisions)
+    {
         putI64(bytes, decision.id);
         putU8(bytes, static_cast<std::uint8_t>(decision.status));
         putStr(bytes, decision.title);
         putStr(bytes, decision.content);
         putU32(bytes, static_cast<std::uint32_t>(decision.supersedes.size()));
-        for (const auto id : decision.supersedes) {
+        for (const auto id : decision.supersedes)
+        {
             putI64(bytes, id);
         }
         putU32(bytes, static_cast<std::uint32_t>(decision.supersededBy.size()));
-        for (const auto id : decision.supersededBy) {
+        for (const auto id : decision.supersededBy)
+        {
             putI64(bytes, id);
         }
         putU32(bytes, static_cast<std::uint32_t>(decision.provenance.sources.size()));
-        for (const auto& source : decision.provenance.sources) {
+        for (const auto& source : decision.provenance.sources)
+        {
             putStr(bytes, source);
         }
     }
 
     putU32(bytes, static_cast<std::uint32_t>(cognition.memory.size()));
-    for (const auto& record : cognition.memory) {
+    for (const auto& record : cognition.memory)
+    {
         putU8(bytes, static_cast<std::uint8_t>(record.kind));
         putU8(bytes, static_cast<std::uint8_t>(record.status));
         putStr(bytes, record.title);
         putStr(bytes, record.statement);
         putU32(bytes, static_cast<std::uint32_t>(record.provenance.sources.size()));
-        for (const auto& source : record.provenance.sources) {
+        for (const auto& source : record.provenance.sources)
+        {
             putStr(bytes, source);
         }
     }
 
     putU32(bytes, static_cast<std::uint32_t>(cognition.obligations.size()));
-    for (const auto& obligation : cognition.obligations) {
+    for (const auto& obligation : cognition.obligations)
+    {
         putU8(bytes, static_cast<std::uint8_t>(obligation.status));
         putU8(bytes, static_cast<std::uint8_t>(obligation.trigger));
         putI64(bytes, obligation.id);
@@ -171,7 +186,8 @@ Bytes serializeImpl(const LLMCognition& cognition)
     }
 
     putU32(bytes, static_cast<std::uint32_t>(cognition.evidence.size()));
-    for (const auto& evidence : cognition.evidence) {
+    for (const auto& evidence : cognition.evidence)
+    {
         putStr(bytes, evidence.boundTo);
         putStr(bytes, evidence.content);
     }
@@ -183,52 +199,61 @@ LLMCognition deserializeImpl(const Bytes& bytes)
 {
     std::size_t offset = 0;
     QIVEN_ASSERT(!bytes.empty());
-    QIVEN_ASSERT(getU8(bytes, offset) == kSerializationVersion);
+    // the version read has a side effect (offset advance) - it must NEVER live
+    // inside QIVEN_ASSERT, which compiles to nothing in Release (NDEBUG)
+    const std::uint8_t version = getU8(bytes, offset);
+    QIVEN_ASSERT(version == kSerializationVersion);
 
-    LLMCognition cognition{0, {}, {}, {}, {}, {}, {}, {}, {}, {}};
+    LLMCognition cognition { 0, {}, {}, {}, {}, {}, {}, {}, {}, {} };
     cognition.governance.rootPrincipal = getStr(bytes, offset);
 
     const auto articleCount = getU32(bytes, offset);
     cognition.constitution.articles.reserve(articleCount);
-    for (std::uint32_t i = 0; i < articleCount; ++i) {
+    for (std::uint32_t i = 0; i < articleCount; ++i)
+    {
         cognition.constitution.articles.push_back(getStr(bytes, offset));
     }
 
     const auto collaborationCount = getU32(bytes, offset);
     cognition.collaborations.reserve(collaborationCount);
-    for (std::uint32_t i = 0; i < collaborationCount; ++i) {
+    for (std::uint32_t i = 0; i < collaborationCount; ++i)
+    {
         CollaborationRule rule;
         rule.domain = static_cast<CollaborationRule::Domain>(getU8(bytes, offset));
-        rule.rule = getStr(bytes, offset);
+        rule.rule   = getStr(bytes, offset);
         cognition.collaborations.push_back(std::move(rule));
     }
 
-    cognition.state.activeWork = getStr(bytes, offset);
-    cognition.state.current = getStr(bytes, offset);
+    cognition.state.activeWork   = getStr(bytes, offset);
+    cognition.state.current      = getStr(bytes, offset);
     cognition.state.repositories = getStr(bytes, offset);
-    cognition.state.roadmap = getStr(bytes, offset);
+    cognition.state.roadmap      = getStr(bytes, offset);
 
     const auto decisionCount = getU32(bytes, offset);
     cognition.decisions.reserve(decisionCount);
-    for (std::uint32_t i = 0; i < decisionCount; ++i) {
+    for (std::uint32_t i = 0; i < decisionCount; ++i)
+    {
         Decision decision;
-        decision.id = getI64(bytes, offset);
-        decision.status = static_cast<Lifecycle>(getU8(bytes, offset));
-        decision.title = getStr(bytes, offset);
-        decision.content = getStr(bytes, offset);
+        decision.id                = getI64(bytes, offset);
+        decision.status            = static_cast<Lifecycle>(getU8(bytes, offset));
+        decision.title             = getStr(bytes, offset);
+        decision.content           = getStr(bytes, offset);
         const auto supersedesCount = getU32(bytes, offset);
         decision.supersedes.reserve(supersedesCount);
-        for (std::uint32_t k = 0; k < supersedesCount; ++k) {
+        for (std::uint32_t k = 0; k < supersedesCount; ++k)
+        {
             decision.supersedes.push_back(getI64(bytes, offset));
         }
         const auto supersededByCount = getU32(bytes, offset);
         decision.supersededBy.reserve(supersededByCount);
-        for (std::uint32_t k = 0; k < supersededByCount; ++k) {
+        for (std::uint32_t k = 0; k < supersededByCount; ++k)
+        {
             decision.supersededBy.push_back(getI64(bytes, offset));
         }
         const auto sourceCount = getU32(bytes, offset);
         decision.provenance.sources.reserve(sourceCount);
-        for (std::uint32_t k = 0; k < sourceCount; ++k) {
+        for (std::uint32_t k = 0; k < sourceCount; ++k)
+        {
             decision.provenance.sources.push_back(getStr(bytes, offset));
         }
         cognition.decisions.push_back(std::move(decision));
@@ -236,15 +261,17 @@ LLMCognition deserializeImpl(const Bytes& bytes)
 
     const auto memoryCount = getU32(bytes, offset);
     cognition.memory.reserve(memoryCount);
-    for (std::uint32_t i = 0; i < memoryCount; ++i) {
+    for (std::uint32_t i = 0; i < memoryCount; ++i)
+    {
         MemoryRecord record;
-        record.kind = static_cast<MemoryRecord::Kind>(getU8(bytes, offset));
-        record.status = static_cast<MemoryRecord::Status>(getU8(bytes, offset));
-        record.title = getStr(bytes, offset);
-        record.statement = getStr(bytes, offset);
+        record.kind            = static_cast<MemoryRecord::Kind>(getU8(bytes, offset));
+        record.status          = static_cast<MemoryRecord::Status>(getU8(bytes, offset));
+        record.title           = getStr(bytes, offset);
+        record.statement       = getStr(bytes, offset);
         const auto sourceCount = getU32(bytes, offset);
         record.provenance.sources.reserve(sourceCount);
-        for (std::uint32_t k = 0; k < sourceCount; ++k) {
+        for (std::uint32_t k = 0; k < sourceCount; ++k)
+        {
             record.provenance.sources.push_back(getStr(bytes, offset));
         }
         cognition.memory.push_back(std::move(record));
@@ -252,19 +279,21 @@ LLMCognition deserializeImpl(const Bytes& bytes)
 
     const auto obligationCount = getU32(bytes, offset);
     cognition.obligations.reserve(obligationCount);
-    for (std::uint32_t i = 0; i < obligationCount; ++i) {
+    for (std::uint32_t i = 0; i < obligationCount; ++i)
+    {
         Obligation obligation;
-        obligation.status = static_cast<Obligation::Status>(getU8(bytes, offset));
-        obligation.trigger = static_cast<Obligation::TriggerKind>(getU8(bytes, offset));
-        obligation.id = getI64(bytes, offset);
-        obligation.statement = getStr(bytes, offset);
+        obligation.status             = static_cast<Obligation::Status>(getU8(bytes, offset));
+        obligation.trigger            = static_cast<Obligation::TriggerKind>(getU8(bytes, offset));
+        obligation.id                 = getI64(bytes, offset);
+        obligation.statement          = getStr(bytes, offset);
         obligation.completionCriteria = getStr(bytes, offset);
         cognition.obligations.push_back(std::move(obligation));
     }
 
     const auto evidenceCount = getU32(bytes, offset);
     cognition.evidence.reserve(evidenceCount);
-    for (std::uint32_t i = 0; i < evidenceCount; ++i) {
+    for (std::uint32_t i = 0; i < evidenceCount; ++i)
+    {
         EvidenceRecord evidence;
         evidence.boundTo = getStr(bytes, offset);
         evidence.content = getStr(bytes, offset);
@@ -276,7 +305,7 @@ LLMCognition deserializeImpl(const Bytes& bytes)
 
 Constitution makeConstitution()
 {
-    Constitution constitution;       // the 18 article titles; full text stays canonical
+    Constitution constitution; // the 18 article titles; full text stays canonical
     constitution.articles = {
         "Project cognition must outlive its participants",
         "Capture conservatively, canonicalize deliberately, retrieve selectively",
@@ -303,8 +332,9 @@ Constitution makeConstitution()
 
 ContentId DraftContentId(const Bytes& stateBytes)
 {
-    std::uint64_t hash = 1469598103934665603ULL;   // FNV-1a 64 — draft stand-in for SHA-256
-    for (const std::byte byte : stateBytes) {
+    std::uint64_t hash = 1469598103934665603ULL; // FNV-1a 64 — draft stand-in for SHA-256
+    for (const std::byte byte : stateBytes)
+    {
         hash ^= static_cast<std::uint64_t>(std::to_integer<unsigned char>(byte));
         hash *= 1099511628211ULL;
     }
@@ -317,12 +347,14 @@ ContentId DraftContentId(const Bytes& stateBytes)
 
 ContentId MemoryStore::append(const Bytes& stateBytes, const ContentId& base)
 {
-    if (!states_.empty() && base != head_) {
-        return {};                     // divergence: appends must chain onto current head
+    if (!states_.empty() && base != head_)
+    {
+        return {}; // divergence: appends must chain onto current head
     }
     const ContentId id = DraftContentId(stateBytes);
-    if (!states_.empty() && id == head_) {
-        return id;                     // idempotent re-append of the current head
+    if (!states_.empty() && id == head_)
+    {
+        return id; // idempotent re-append of the current head
     }
     states_.emplace_back(id, stateBytes);
     head_ = id;
@@ -331,8 +363,10 @@ ContentId MemoryStore::append(const Bytes& stateBytes, const ContentId& base)
 
 Bytes MemoryStore::materialize(const ContentId& id) const
 {
-    for (const auto& [key, stateBytes] : states_) {
-        if (key == id) {
+    for (const auto& [key, stateBytes] : states_)
+    {
+        if (key == id)
+        {
             return stateBytes;
         }
     }
@@ -341,15 +375,17 @@ Bytes MemoryStore::materialize(const ContentId& id) const
 
 Bytes MemoryStore::readDelta(const ContentId& base, const ContentId& target) const
 {
-    static_cast<void>(base);           // state-replication: the receiver materializes the
-    return materialize(target);        // target; a real transport encodes the diff
+    static_cast<void>(base);    // state-replication: the receiver materializes the
+    return materialize(target); // target; a real transport encodes the diff
 }
 
 bool MemoryStore::verify(const ContentId& id) const
 {
-    for (const auto& [key, stateBytes] : states_) {
+    for (const auto& [key, stateBytes] : states_)
+    {
         static_cast<void>(stateBytes);
-        if (key == id) {
+        if (key == id)
+        {
             return true;
         }
     }
@@ -397,7 +433,7 @@ ContentId GitStore::head() const
 // --- QivenContext: the gated service -----------------------------------------
 
 std::mutex QivenContext::g_admission;
-std::atomic<Epoch> QivenContext::g_epoch{0};
+std::atomic<Epoch> QivenContext::g_epoch { 0 };
 std::shared_ptr<ICognitionStore> QivenContext::g_store;
 std::vector<QivenContext::Registry> QivenContext::g_live;
 
@@ -410,36 +446,39 @@ void QivenContext::attachStore(std::shared_ptr<ICognitionStore> store)
 std::shared_ptr<LLMCognition> QivenContext::CreateCognition(const CognitionSource& source)
 {
     std::lock_guard lock(g_admission);
-    QIVEN_ASSERT(g_store != nullptr);  // draft precondition: attachStore before boot
+    QIVEN_ASSERT(g_store != nullptr); // draft precondition: attachStore before boot
 
     Bytes bytes;
     bool quarantined = false;
-    switch (source.kind) {
-    case CognitionSourceKind::CanonicalRemote: {
+    switch (source.kind)
+    {
+    case CognitionSourceKind::CanonicalRemote:
+    {
         const ContentId id = source.contentId.empty() ? g_store->head() : source.contentId;
-        bytes = g_store->materialize(id);
-        if (bytes.empty()) {
+        bytes              = g_store->materialize(id);
+        if (bytes.empty())
+        {
             // genesis: no canonical state yet — materialize the empty cognition
             // (governance defaults + constitution) and append it as state #1
-            const LLMCognition genesis{0,
-                                       {},
-                                       Governance{"github:JasonHuang3D"},
-                                       makeConstitution(),
-                                       {},
-                                       State{},
-                                       {},
-                                       {},
-                                       {},
-                                       {}};
-            bytes = serializeImpl(genesis);
+            const LLMCognition genesis { 0,
+                                         {},
+                                         Governance { "github:JasonHuang3D" },
+                                         makeConstitution(),
+                                         {},
+                                         State {},
+                                         {},
+                                         {},
+                                         {},
+                                         {} };
+            bytes                    = serializeImpl(genesis);
             const ContentId appended = g_store->append(bytes, {});
             QIVEN_ASSERT(!appended.empty());
         }
         break;
     }
     case CognitionSourceKind::HandoffArtifact:
-        bytes = source.inlineBytes;    // K4: restored from artifact bytes alone
-        quarantined = true;            // non-authoritative until a governed cutover
+        bytes       = source.inlineBytes; // K4: restored from artifact bytes alone
+        quarantined = true;               // non-authoritative until a governed cutover
         break;
     case CognitionSourceKind::CompressedStream:
         throw std::logic_error("qiven-context-draft: K5 compressed transport not implemented");
@@ -447,26 +486,26 @@ std::shared_ptr<LLMCognition> QivenContext::CreateCognition(const CognitionSourc
     QIVEN_ASSERT(!bytes.empty());
 
     LLMCognition restored = deserializeImpl(bytes);
-    const Epoch epoch = g_epoch.fetch_add(1) + 1;   // authority token per materialization
-    auto cognition = std::shared_ptr<LLMCognition>(
+    const Epoch epoch     = g_epoch.fetch_add(1) + 1; // authority token per materialization
+    auto cognition        = std::shared_ptr<LLMCognition>(
         new LLMCognition(epoch,
-                         DraftContentId(bytes),   // content identity of this very state
-                         std::move(restored.governance),
-                         std::move(restored.constitution),
-                         std::move(restored.collaborations),
-                         std::move(restored.state),
-                         std::move(restored.decisions),
-                         std::move(restored.memory),
-                         std::move(restored.obligations),
-                         std::move(restored.evidence)));
+                                DraftContentId(bytes), // content identity of this very state
+                                std::move(restored.governance),
+                                std::move(restored.constitution),
+                                std::move(restored.collaborations),
+                                std::move(restored.state),
+                                std::move(restored.decisions),
+                                std::move(restored.memory),
+                                std::move(restored.obligations),
+                                std::move(restored.evidence)));
 
-    g_live.push_back(Registry{cognition, quarantined});
+    g_live.push_back(Registry { cognition, quarantined });
     return cognition;
 }
 
 Data QivenContext::ReadFromCognition(const LLMCognition* cognition, const Query& query)
 {
-    static_cast<void>(query);          // budget enforcement is K5's domain (lossless transport)
+    static_cast<void>(query); // budget enforcement is K5's domain (lossless transport)
     // no admission lock: the snapshot is a by-value copy of immutable semantics
     return serializeImpl(*cognition);
 }
@@ -476,105 +515,125 @@ bool QivenContext::WriteToCognition(LLMCognition* cognition, const TransactionDe
 {
     std::lock_guard lock(g_admission);
 
-    Registry* entry = nullptr;                       // 0. known, current, non-quarantined
-    for (auto& live : g_live) {
-        if (live.cognition.get() == cognition) {
+    Registry* entry = nullptr; // 0. known, current, non-quarantined
+    for (auto& live : g_live)
+    {
+        if (live.cognition.get() == cognition)
+        {
             entry = &live;
             break;
         }
     }
-    if (entry == nullptr || entry->quarantined) {
+    if (entry == nullptr || entry->quarantined)
+    {
         return false;
     }
-    if (cognition->epoch != g_epoch.load()) {
-        return false;                  // runtime swap happened: think again (authority)
+    if (cognition->epoch != g_epoch.load())
+    {
+        return false; // runtime swap happened: think again (authority)
     }
-    if (delta.kind == TransactionDelta::Kind::None) {
-        return true;                   // ordinary turn: no context commit needed
+    if (delta.kind == TransactionDelta::Kind::None)
+    {
+        return true; // ordinary turn: no context commit needed
     }
-    if (delta.base != cognition->contentId) {
-        return false;                  // durable divergence: re-read (authority)
+    if (delta.base != cognition->contentId)
+    {
+        return false; // durable divergence: re-read (authority)
     }
 
-    if (delta.kind == TransactionDelta::Kind::AppendDecision) {   // 2. typed handoff
-        if (!delta.handoff.has_value() || delta.handoff != Handoff::H2_Review
-            || delta.handoffEvidenceRef.empty()) {
-            return false;              // acceptance = merge-class semantics; waiver N/A
+    if (delta.kind == TransactionDelta::Kind::AppendDecision)
+    { // 2. typed handoff
+        if (!delta.handoff.has_value() || delta.handoff != Handoff::H2_Review || delta.handoffEvidenceRef.empty())
+        {
+            return false; // acceptance = merge-class semantics; waiver N/A
         }
     }
 
-    if (mode == WorkMode::Unattended) {
-        return false;                  // 3. unattended = read-only default (ADR-0036)
+    if (mode == WorkMode::Unattended)
+    {
+        return false; // 3. unattended = read-only default (ADR-0036)
     }
 
-    switch (delta.kind) {              // 4. record invariants (draft subset)
+    switch (delta.kind)
+    { // 4. record invariants (draft subset)
     case TransactionDelta::Kind::AppendDecision:
-        if (delta.recordId <= 0 || delta.title.empty() || delta.payload.empty()) {
+        if (delta.recordId <= 0 || delta.title.empty() || delta.payload.empty())
+        {
             return false;
         }
-        for (const auto& existing : cognition->decisions) {
-            if (existing.id == delta.recordId) {
-                return false;          // ids are never reused
+        for (const auto& existing : cognition->decisions)
+        {
+            if (existing.id == delta.recordId)
+            {
+                return false; // ids are never reused
             }
         }
         break;
     case TransactionDelta::Kind::AddMemoryRecord:
     case TransactionDelta::Kind::UpsertObligation:
-        if (delta.payload.empty()
-            || (delta.kind == TransactionDelta::Kind::UpsertObligation && delta.recordId <= 0)) {
+        if (delta.payload.empty() || (delta.kind == TransactionDelta::Kind::UpsertObligation && delta.recordId <= 0))
+        {
             return false;
         }
         break;
-    case TransactionDelta::Kind::CloseObligation: {
+    case TransactionDelta::Kind::CloseObligation:
+    {
         bool foundOpen = false;
-        for (const auto& obligation : cognition->obligations) {
-            if (obligation.id == delta.recordId && obligation.status == Obligation::Status::Open) {
+        for (const auto& obligation : cognition->obligations)
+        {
+            if (obligation.id == delta.recordId && obligation.status == Obligation::Status::Open)
+            {
                 foundOpen = true;
                 break;
             }
         }
-        if (!foundOpen) {
+        if (!foundOpen)
+        {
             return false;
         }
         break;
     }
     case TransactionDelta::Kind::UpdateState:
-        if (delta.payload.empty()) {
+        if (delta.payload.empty())
+        {
             return false;
         }
         break;
     case TransactionDelta::Kind::None:
-        return false;                  // handled above; defensive
+        return false; // handled above; defensive
     }
 
-    switch (delta.kind) {              // 5. apply, then persist the new full state
+    switch (delta.kind)
+    { // 5. apply, then persist the new full state
     case TransactionDelta::Kind::AppendDecision:
-        cognition->decisions.push_back(Decision{delta.recordId,
-                                                Lifecycle::Accepted,
-                                                delta.title,
-                                                delta.payload,
-                                                {},
-                                                {},
-                                                Provenance{{delta.handoffEvidenceRef}}});
+        cognition->decisions.push_back(Decision { delta.recordId,
+                                                  Lifecycle::Accepted,
+                                                  delta.title,
+                                                  delta.payload,
+                                                  {},
+                                                  {},
+                                                  Provenance { { delta.handoffEvidenceRef } } });
         break;
     case TransactionDelta::Kind::AddMemoryRecord:
-        cognition->memory.push_back(MemoryRecord{MemoryRecord::Kind::Lesson,
-                                                 MemoryRecord::Status::Active,
-                                                 delta.title,
-                                                 delta.payload,
-                                                 Provenance{}});
+        cognition->memory.push_back(MemoryRecord { MemoryRecord::Kind::Lesson,
+                                                   MemoryRecord::Status::Active,
+                                                   delta.title,
+                                                   delta.payload,
+                                                   Provenance {} });
         break;
     case TransactionDelta::Kind::UpsertObligation:
-        cognition->obligations.push_back(Obligation{Obligation::Status::Open,
-                                                    Obligation::TriggerKind::Manual,
-                                                    delta.recordId,
-                                                    delta.payload,
-                                                    {}});
+        cognition->obligations.push_back(Obligation { Obligation::Status::Open,
+                                                      Obligation::TriggerKind::Manual,
+                                                      delta.recordId,
+                                                      delta.payload,
+                                                      {} });
         break;
     case TransactionDelta::Kind::CloseObligation:
-        for (auto& obligation : cognition->obligations) {
-            if (obligation.id == delta.recordId) {
-                obligation.status = Obligation::Status::Done;   // history kept, status moves
+        for (auto& obligation : cognition->obligations)
+        {
+            if (obligation.id == delta.recordId)
+            {
+                obligation.status = Obligation::Status::Done; // history kept, status moves
                 break;
             }
         }
@@ -587,26 +646,29 @@ bool QivenContext::WriteToCognition(LLMCognition* cognition, const TransactionDe
     }
 
     const Bytes newState = serializeImpl(*cognition);
-    const ContentId id = g_store->append(newState, cognition->contentId);
-    if (id.empty()) {
-        return false;                  // store-level divergence (paranoid double-check)
+    const ContentId id   = g_store->append(newState, cognition->contentId);
+    if (id.empty())
+    {
+        return false; // store-level divergence (paranoid double-check)
     }
-    cognition->contentId = id;         // the durable fencing token advances
+    cognition->contentId = id; // the durable fencing token advances
     return true;
 }
 
 Epoch QivenContext::currentEpoch()
 {
-    return g_epoch.load();             // lock-free sampling: cheap staleness pre-checks
+    return g_epoch.load(); // lock-free sampling: cheap staleness pre-checks
 }
 
 bool QivenContext::RetireCognition(const std::shared_ptr<LLMCognition>& cognition)
 {
     std::lock_guard lock(g_admission);
-    for (std::size_t i = 0; i < g_live.size(); ++i) {
-        if (g_live[i].cognition == cognition) {
+    for (std::size_t i = 0; i < g_live.size(); ++i)
+    {
+        if (g_live[i].cognition == cognition)
+        {
             g_live.erase(g_live.begin() + static_cast<std::ptrdiff_t>(i));
-            return true;               // destruction deferred until the last pin releases
+            return true; // destruction deferred until the last pin releases
         }
     }
     return false;
@@ -616,28 +678,33 @@ bool QivenContext::IsContinueable(const Human* human, const LLMClientTool* clien
                                   const Device* device, const LLM* llm,
                                   const LLMCognition* cognition)
 {
-    if (human == nullptr || client == nullptr || device == nullptr || llm == nullptr
-        || cognition == nullptr) {
+    if (human == nullptr || client == nullptr || device == nullptr || llm == nullptr || cognition == nullptr)
+    {
         return false;
     }
-    if (cognition->epoch != g_epoch.load()) {
-        return false;                  // stale materialization
+    if (cognition->epoch != g_epoch.load())
+    {
+        return false; // stale materialization
     }
-    if (g_store == nullptr || !g_store->verify(cognition->contentId)) {
-        return false;                  // state must be restorable from the store
+    if (g_store == nullptr || !g_store->verify(cognition->contentId))
+    {
+        return false; // state must be restorable from the store
     }
-    if (human->verifiedPrincipal.empty()
-        || human->verifiedPrincipal != cognition->governance.rootPrincipal) {
-        return false;                  // authority present (R4)
+    if (human->verifiedPrincipal.empty() || human->verifiedPrincipal != cognition->governance.rootPrincipal)
+    {
+        return false; // authority present (R4)
     }
-    if (!client->operational || !device->reachable) {
-        return false;                  // runtime plane alive
+    if (!client->operational || !device->reachable)
+    {
+        return false; // runtime plane alive
     }
-    for (const auto& obligation : cognition->obligations) {
-        if (obligation.status == Obligation::Status::Blocked) {
-            return false;              // an explicit blocker halts the loop
+    for (const auto& obligation : cognition->obligations)
+    {
+        if (obligation.status == Obligation::Status::Blocked)
+        {
+            return false; // an explicit blocker halts the loop
         }
     }
-    return true;                       // budget remains: open design question (draft)
+    return true; // budget remains: open design question (draft)
 }
 } // namespace qiven::context

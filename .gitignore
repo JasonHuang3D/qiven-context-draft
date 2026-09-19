@@ -2,3 +2,7 @@ build/
 out/
 .vs/
 *.user
+
+# python bytecode
+__pycache__/
+*.pyc

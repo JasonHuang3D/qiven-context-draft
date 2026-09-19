@@ -72,7 +72,7 @@ public:
 
 private:
     std::vector<std::pair<ContentId, Bytes>> states_; // linear history, genesis first
-    ContentId head_{};
+    ContentId head_ {};
 };
 
 // git implementation — DOCUMENTED SKETCH, deliberately not implemented here.
@@ -102,51 +102,51 @@ public:
 
 enum class CognitionSourceKind
 {
-    CanonicalRemote,                   // cold boot: git fetch (transport impl #1)
-    HandoffArtifact,                   // K4: artifact-only until sealed (impl #2)
-    CompressedStream,                  // K5: lossless transport (impl #3)
+    CanonicalRemote,  // cold boot: git fetch (transport impl #1)
+    HandoffArtifact,  // K4: artifact-only until sealed (impl #2)
+    CompressedStream, // K5: lossless transport (impl #3)
 };
 
 struct CognitionSource
 {
-    CognitionSourceKind kind{CognitionSourceKind::CanonicalRemote};
-    ContentId contentId;               // addressed by content — NOT necessarily a commit;
-                                       // empty = store head (genesis when store is empty)
-    Bytes inlineBytes;                 // HandoffArtifact: the artifact payload itself
+    CognitionSourceKind kind { CognitionSourceKind::CanonicalRemote };
+    ContentId contentId; // addressed by content — NOT necessarily a commit;
+                         // empty = store head (genesis when store is empty)
+    Bytes inlineBytes;   // HandoffArtifact: the artifact payload itself
 };
 
 struct Query
 {
-    std::string taskScope;             // mandatory inputs always included (BOOTSTRAP set)
-    std::size_t tokenBudget{};         // K5 domain: effective input tokens, lossless
+    std::string taskScope;      // mandatory inputs always included (BOOTSTRAP set)
+    std::size_t tokenBudget {}; // K5 domain: effective input tokens, lossless
 };
 
-using Data = Bytes;                    // full materialized snapshot for thinking (ADR-0033)
+using Data = Bytes; // full materialized snapshot for thinking (ADR-0033)
 
-struct TransactionDelta                // write shape: only what changed
+struct TransactionDelta // write shape: only what changed
 {
     enum class Kind
     {
-        None,                          // ordinary conversational turn: no context commit
-        AppendDecision,                // requires H2 (acceptance = merge-class semantics)
+        None,           // ordinary conversational turn: no context commit
+        AppendDecision, // requires H2 (acceptance = merge-class semantics)
         AddMemoryRecord,
         UpsertObligation,
         CloseObligation,
         UpdateState,
     };
-    Kind kind{Kind::None};
-    ContentId base;                    // durable fencing token: contentId my thinking assumed
-    std::int64_t recordId{};           // decision id / obligation id, per kind
+    Kind kind { Kind::None };
+    ContentId base;           // durable fencing token: contentId my thinking assumed
+    std::int64_t recordId {}; // decision id / obligation id, per kind
     std::string title;
     std::string payload;
-    std::optional<Handoff> handoff;    // typed handoff evidence, when the class requires one
-    std::string handoffEvidenceRef;    // PR record / gate evidence / audit id
+    std::optional<Handoff> handoff; // typed handoff evidence, when the class requires one
+    std::string handoffEvidenceRef; // PR record / gate evidence / audit id
 };
 
 enum class WorkMode
 {
-    SupervisedForeground,              // owner-launched, owner-visible session
-    Unattended,                        // scheduled/idle: read-only default (ADR-0036)
+    SupervisedForeground, // owner-launched, owner-visible session
+    Unattended,           // scheduled/idle: read-only default (ADR-0036)
 };
 
 // --- the service (v0 statics preserved: a service, not an object) ------------
@@ -184,15 +184,15 @@ public:
     [[nodiscard]] static Epoch currentEpoch(); // lock-free sampling for pre-checks
 
 private:
-    struct Registry                    // per-epoch runtime metadata, kept OUT of the
-    {                                  // value tree (R1): quarantine flags, liveness
+    struct Registry // per-epoch runtime metadata, kept OUT of the
+    {               // value tree (R1): quarantine flags, liveness
         std::shared_ptr<LLMCognition> cognition;
-        bool quarantined{false};       // K4: restored artifacts stay non-authoritative
+        bool quarantined { false }; // K4: restored artifacts stay non-authoritative
     };
 
     static std::mutex g_admission;     // the single-writer gate (ADR-0026, in-process)
     static std::atomic<Epoch> g_epoch; // monotonic; fetch_add on each CreateCognition
     static std::shared_ptr<ICognitionStore> g_store;
-    static std::vector<Registry> g_live;   // epoch-indexed live cognitions
+    static std::vector<Registry> g_live; // epoch-indexed live cognitions
 };
 } // namespace qiven::context
