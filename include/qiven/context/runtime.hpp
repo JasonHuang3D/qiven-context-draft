@@ -120,6 +120,14 @@ struct LLM
     void Work(const std::string& prompt, const AuthenticatedActor& actor, std::string& result,
               WorkMode mode = WorkMode::SupervisedForeground);
 
+private:
+    // the causal body; Work() wraps this and guarantees annotate_budget on
+    // every completed turn (DR-012: the budget invariant covers ALL paths)
+    void work_impl(const std::string& prompt, const AuthenticatedActor& actor,
+                   std::string& result, WorkMode mode,
+                   std::chrono::steady_clock::time_point turnStart);
+
+public:
     // truthful budget annotation on the checkpoint (observable state only —
     // no invented percentages; MEM-8F2C41)
     void annotate_budget(std::chrono::steady_clock::time_point turnStart);
