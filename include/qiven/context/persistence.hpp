@@ -299,7 +299,9 @@ struct ContextTransaction
 // content identity of the ordered operations — what an H2 review binds to
 [[nodiscard]] ContentId DigestOperations(const std::vector<Operation>& operations);
 
-struct ReviewRecord // the process-layer artifact an H2Evidence comes FROM
+struct ReviewRecord // the process-layer artifact an H2Evidence comes FROM;
+                    // pit.merge_surrogate_refused: publication paths are
+                    // process-level (named-branch push / gh pr create only)
 {                   // (process-model §2): the digest binds it to the exact
                     // delta; the binding enables the self-certification ban
     ContentId reviewedDeltaDigest;
@@ -310,8 +312,8 @@ struct ReviewRecord // the process-layer artifact an H2Evidence comes FROM
     std::vector<std::string> findings;    // blocking / non-blocking, with evidence
 };
 
-enum class ContinuityTrialKind // ADR-0034: delivery profiles are distinct
-{                              // properties (pit P-13); a remote cold boot
+enum class ContinuityTrialKind // ADR-0034 + pit.cold_boot_not_artifact_trial:
+{                              // delivery profiles are distinct properties; a remote cold boot
     RemoteColdBoot,            // NEVER substitutes for an artifact trial, and
     CanonicalArtifactHandoff,  // acceptance trials are REAL topologies — they
     HumanSuccession,           // cannot be simulated by the authoring session
@@ -337,7 +339,7 @@ enum class CognitionSourceKind
 {
     CanonicalRemote,  // cold boot: git fetch (transport impl #1)
     HandoffArtifact,  // K4: artifact-only until sealed (impl #2)
-    CompressedStream, // K5: lossless transport (impl #3)
+    CompressedStream, // K5: lossless transport (impl #3); pit.k5_transport_only
 };
 
 struct CognitionSource

@@ -7,31 +7,69 @@
       "builtin": "exact_head"
     },
     "check-toolchain": {
-      "argv": ["{python}", "tools/check_toolchain.py"]
+      "argv": [
+        "{python}",
+        "tools/check_toolchain.py"
+      ]
     },
     "format-check": {
-      "argv": ["{python}", "tools/format_sources.py", "--check"]
+      "argv": [
+        "{python}",
+        "tools/format_sources.py",
+        "--check"
+      ]
     },
     "format": {
-      "argv": ["{python}", "tools/format_sources.py", "--fix"]
+      "argv": [
+        "{python}",
+        "tools/format_sources.py",
+        "--fix"
+      ]
     },
     "configure": {
-      "argv": ["{cmake}", "--preset", "vs2022-x64"]
+      "argv": [
+        "{cmake}",
+        "--preset",
+        "vs2022-x64"
+      ]
     },
     "delete-all-branches-but-main": {
-      "argv": ["{python}", "tools/delete_all_branches.py"]
+      "argv": [
+        "{python}",
+        "tools/delete_all_branches.py"
+      ]
     },
     "build-debug": {
-      "argv": ["{cmake}", "--build", "--preset", "vs2022-x64-debug", "--parallel"]
+      "argv": [
+        "{cmake}",
+        "--build",
+        "--preset",
+        "vs2022-x64-debug",
+        "--parallel"
+      ]
     },
     "build-release": {
-      "argv": ["{cmake}", "--build", "--preset", "vs2022-x64-release", "--parallel"]
+      "argv": [
+        "{cmake}",
+        "--build",
+        "--preset",
+        "vs2022-x64-release",
+        "--parallel"
+      ]
     },
     "test-debug": {
-      "argv": ["{ctest}", "--preset", "vs2022-x64-debug"]
+      "argv": [
+        "{ctest}",
+        "--preset",
+        "vs2022-x64-debug"
+      ]
     },
     "test-release": {
-      "argv": ["{ctest}", "--preset", "vs2022-x64-release"]
+      "argv": [
+        "{ctest}",
+        "--preset",
+        "vs2022-x64-release"
+      ]
     },
     "diff-check": {
       "builtin": "git_diff_check",
@@ -41,7 +79,16 @@
       "builtin": "git_clean_tree"
     },
     "apply-patch": {
-      "argv": ["{python}", "tools/apply_patch.py"]
+      "argv": [
+        "{python}",
+        "tools/apply_patch.py"
+      ]
+    },
+    "pit-traceability": {
+      "argv": [
+        "python",
+        "tools/check_pit_map.py"
+      ]
     }
   },
   "gates": {
@@ -49,8 +96,15 @@
       "check-toolchain",
       "format-check",
       "configure",
-      ["build-debug", "build-release"],
-      ["test-debug", "test-release"],
+      [
+        "build-debug",
+        "build-release"
+      ],
+      "pit-traceability",
+      [
+        "test-debug",
+        "test-release"
+      ],
       "diff-check",
       "clean-tree"
     ]

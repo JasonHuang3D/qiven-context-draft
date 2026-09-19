@@ -69,7 +69,7 @@ void putStr(Bytes& bytes, const std::string& value)
 // assert (DR-009 — asserts compile away in Release and the artifact path is
 // untrusted input) -----------------------------------------------------------
 
-struct Reader
+struct Reader // pit.release_deserialize_safe: typed bounds, never asserts
 {
     const Bytes& bytes;
     std::size_t offset { 0 };
@@ -304,6 +304,7 @@ Bytes serializeImpl(const Snapshot& snapshot)
         putStr(bytes, profile.summary);
     }
 
+    // pit.export_carries_view_specs: views are exported with the snapshot
     putU32(bytes, static_cast<std::uint32_t>(snapshot.views.size()));
     for (const auto& view : snapshot.views)
     {
@@ -562,7 +563,9 @@ Constitution makeConstitution()
 }
 
 PolicyTable makeDefaultPolicy()
-{ // the ADR-0036 classification table + the recovery ladder, as cognition data
+{ // the ADR-0036 classification table + the recovery ladder, as cognition data;
+  // pit.connector_refusal_switches_path: connector/transport refusals surface
+  // as typed Verdict reasons with the mandated authoring-path switch
     PolicyTable policy;
     policy.handoff = {
         { OperationClass::DecisionAcceptance, true, false }, // merge-class: H2 mandatory
@@ -749,6 +752,7 @@ StoreReceipt MemoryStore::compareAndSwap(const RevisionId& base, const Bytes& st
     {
         return StoreReceipt { StoreReceipt::Kind::CompareFailed, {} }; // definitely not committed
     }
+    // pit.recovery_never_replays: recovery materializes; it never replays
     if (!revisions_.empty() && revisions_.back().second == stateBytes)
     {
         // idempotent re-commit: the head already holds exactly these bytes
@@ -866,7 +870,9 @@ void QivenContext::attachIdentityVerifier(std::shared_ptr<IIdentityVerifier> ver
 CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, DeserializeError* err)
 {
     std::lock_guard lock(g_admission);
-    QIVEN_ASSERT(g_store != nullptr); // draft precondition: attachStore before boot
+    // NOTE: the HandoffArtifact path is deliberately store-FREE — a K4 consumer
+    // is isolated and must reconstruct from the artifact alone (the 2026-09-20
+    // trial probe caught this assert firing on the consumer side).
 
     auto fail = [&](DeserializeError error) -> CognitionHandle {
         if (err)
@@ -883,6 +889,7 @@ CognitionHandle QivenContext::CreateCognition(const CognitionSource& source, Des
     {
     case CognitionSourceKind::CanonicalRemote:
     {
+        QIVEN_ASSERT(g_store != nullptr); // only the cold-boot path needs a store
         const RevisionId id = IsEmpty(source.revision) ? g_store->head() : source.revision;
         bytes               = g_store->materialize(id);
         if (bytes.empty())
@@ -1022,6 +1029,8 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
     {
         return refuse(RefusalReason::GovernanceDenied); // pit P-33: restore never self-promotes
     }
+    // pit.grant_is_port_minted + pit.rejected_flow_stays_fenced:
+    // only the minted GrantId is accepted; refusals never de-fence the lease
     if (IsEmpty(g_activeGrantId) || g_activeGrantId != grant.id())
     {
         return refuse(RefusalReason::GrantRefused); // stale or foreign grants never regain authority
@@ -1083,6 +1092,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         }
         if (row->requiresH2)
         {
+            // pit.handoff_has_no_waiver_path: every branch below refuses
             if (!transaction.h2.has_value())
             {
                 return refuse(RefusalReason::HandoffMissing); // no-verbal-waiver: no retry
@@ -1163,9 +1173,10 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             break;
         }
         case Operation::Kind::AddMemory:
+            // pit.unprovenanced_record_refused: provenance is required (const. #9)
             if (operation.payload.empty() || operation.provenanceRef.empty() || operation.aux > 5)
             {
-                return refuse(RefusalReason::InvariantFailed); // pit P-37: no unprovenanced lessons
+                return refuse(RefusalReason::InvariantFailed);
             }
             break;
         case Operation::Kind::UpsertObligation:
@@ -1315,6 +1326,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         }
     }
 
+    // pit.partial_transaction_never_visible: validate-all-then-apply-all
     // apply atomically onto a successor snapshot (DR-001: the current tree is
     // never mutated in place; the successor is published whole or not at all)
     Snapshot next = current;
@@ -1609,6 +1621,8 @@ ContextBundle QivenContext::BuildBundle(const CognitionHandle& handle, const Que
     ContextBundle bundle;
     bundle.snapshot = handle->revision;
 
+    // pit.index_never_canonical: no retrieval index exists in this draft at
+    // all - bundles rehydrate from the snapshot, so a stale index cannot exist
     // SEMANTIC floors: real content, present regardless of any budget
     // (S1-R3, review §8: floor COUNT is not floor CONTENT)
     bundle.mandatoryInputs.push_back("governance: " + snapshot.governance.rootPrincipal);

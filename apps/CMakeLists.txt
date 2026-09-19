@@ -8,3 +8,14 @@ set_target_properties(
         CXX_EXTENSIONS OFF
         FOLDER "Apps"
 )
+
+add_executable(qiven-context-draft-artifact-trial artifact_trial.cpp)
+target_link_libraries(qiven-context-draft-artifact-trial PRIVATE qiven::context-draft)
+qiven_context_draft_enable_strong_warnings(qiven-context-draft-artifact-trial)
+
+set_target_properties(
+    qiven-context-draft-artifact-trial
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+        FOLDER "Apps"
+)

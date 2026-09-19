@@ -122,7 +122,7 @@ int main()
     // integrity digest and the storage revision, and they are different types
     std::printf("genesis digest: %s revision: %s\n", c1->digest.value.c_str(),
                 c1->revision.value.c_str());
-    QCD_CHECK(c1->digest == SnapshotDigest { "snap-ae811bad8dada212" }); // v5 genesis format
+    QCD_CHECK(c1->digest == SnapshotDigest { "snap-ae811bad8dada212" }); // pit.golden_vector_pinned (v5 genesis format)
     QCD_CHECK(!IsEmpty(c1->revision));
 
     // pit.port_never_reenters_service (P-42): the identity port receives the
