@@ -57,7 +57,7 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
         result                 = name + ": grant refused";
         return;
     }
-    checkpoint.servingDisclosure = actor.servingModel + "/" + actor.binding;
+    checkpoint.servingDisclosure = actor.servingModel + "/" + actor.binding; // pit.undisclosed_substitution_flagged
 
     // 2. full snapshot for thinking — the typed Bundle with floors lands in
     //    Phase 2 (DR-007); token cost is a Bundle concern, never K5's
@@ -103,6 +103,7 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
     if (verdict.outcome == Verdict::Outcome::OutcomeUnknown)
     {
         // typed absence: the commit outcome is genuinely unknowable right now
+        // pit.gaps_recorded_not_synthesized: typed absence, never synthesized
         checkpoint.evidenceGaps.push_back({ "commit outcome for key " + transaction.idempotencyKey,
                                             "store acknowledgement lost; the receipt records it as unresolved" });
     }
@@ -135,7 +136,7 @@ void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::
     annotateBudget(turnStart);
 }
 
-void LLM::annotateBudget(std::chrono::steady_clock::time_point turnStart)
+void LLM::annotateBudget(std::chrono::steady_clock::time_point turnStart) // pit.liveness_reports_observables
 {
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - turnStart);

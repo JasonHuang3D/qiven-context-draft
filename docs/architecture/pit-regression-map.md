@@ -55,13 +55,13 @@ Failure classes: `AUTH` authority/identity · `EVID` evidence/acceptance ·
 
 | ID | Pit | Canonical evidence | Class | Encoding | Test name | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| P-18 | Retrieval engine not invoked at material task transitions — operationally a miss | constitution §16; OBL-20260914T124259Z-7A4D13 | RETR | `RetrievalTrigger` typed; invocation tracked | `pit.transition_requires_retrieval` | v3 |
+| P-18 | Retrieval engine not invoked at material task transitions — operationally a miss | constitution §16; OBL-20260914T124259Z-7A4D13 | RETR | `RetrievalTrigger` typed; invocation tracked | `pit.transition_requires_retrieval` | Phase 4 |
 | P-19 | Retrieval candidates treated as truth | context-read-contract; retrieval-candidate-acceptance schema | RETR | `Candidate` type; rehydration from snapshot; epistemic type preserved | `pit.candidate_not_truth` | v3 |
 | P-20 | Budget pressure silently dropping mandatory inputs | ADR-0033 §6; R1 mandatory-input rules | RETR | floors non-negotiable; budget shrinks candidates only (DR-007) | `pit.bundle_floor_survives_budget` | v3 |
 | P-21 | Byte compression claimed as token compression; hidden external dictionaries | ADR-0034 K5 section | RETR | K5 transport-only; decoder travels with artifact; pinned-tokenizer measurement contract | `pit.k5_transport_only` | v3 |
 | P-27 | Silent long-running work mistaken for a hang; invented progress | MEM-20260913T194500Z-8F2C41; MEM-20260915T135800Z-6B0D8A | PROC | `TurnBudget`; liveness observable-state-only | `pit.liveness_reports_observables` | v3 |
 | P-34 | Derived index promoted to truth; query silently reading a different snapshot | constitution §13; ADR-0033 §8 | RETR | bundle bound to one snapshot id; index lag is a diagnostic | `pit.index_never_canonical` | v3 |
-| P-35 | Epistemic types collapsing (observation → invariant; CI green → acceptance) | constitution §8; MEM-20260916T020500Z-A27C91 | EPIST | `EpistemicType` axis; gates distinguish evidence from acceptance | `pit.observation_not_invariant` | v3 |
+| P-35 | Epistemic types collapsing (observation → invariant; CI green → acceptance) | constitution §8; MEM-20260916T020500Z-A27C91 | EPIST | `EpistemicType` axis; gates distinguish evidence from acceptance | `pit.observation_not_invariant` | Phase 4 |
 
 ## Environment, views, governance
 
@@ -69,7 +69,7 @@ Failure classes: `AUTH` authority/identity · `EVID` evidence/acceptance ·
 | --- | --- | --- | --- | --- | --- | --- |
 | P-13 | Remote cold boot mistaken for artifact-handoff proof | ADR-0034; pre-correction K4 challenge | EVID | trial topologies typed distinct (`ContinuityTrial` kinds); a cold boot cannot satisfy the artifact profile | `pit.cold_boot_not_artifact_trial` | v3 (spec-level) |
 | P-38 | Durable profiles treated as live snapshots (paths, versions, VPN) | ADR-0035 verify_live; environment profile policy | ENV | profiles carry families; exact values verified via ports; never cached in tree | `pit.profiles_family_only` | v3 |
-| P-39 | Genesis baking the governance principal into the tree as identity | R4; authority.yaml evolution rule | AUTH | governance amendments are gated operations; principal-as-identity verified live | `pit.governance_amendable` | v3 |
+| P-39 | Genesis baking the governance principal into the tree as identity | R4; authority.yaml evolution rule | AUTH | governance amendments are gated operations; principal-as-identity verified live | `pit.governance_amendable` | Phase 4 |
 | P-40 | View declarations excluded from context/export ("views are runtime parameters") | ADR-0033 §7/§10; operating model views/ surface; ContextView reference-integrity validation | EPIST | `ViewSpec` in tree; resolution at read; integrity checked (DR-008) | `pit.export_carries_view_specs` | v3 |
 | P-41 | A participant combination assumed when the applicable view was uncertain | BOOTSTRAP step-10 rule (2026-09-18) | AUTH | view resolution falls back to identity-independent context; no invention | `pit.view_never_invented` | v3 |
 | P-42 | The identity port re-entered the service while the admission mutex was held: same-thread re-lock of a non-recursive `std::mutex` threw `resource_deadlock_would_occur`; uncaught, it terminated silently (exit 3) and the CRT abort dialog paused unattended runs for human clicks | 2026-09-19 incident during v3 Phase 1: Debug ctest "hangs" were operator click latency on the MSVC abort-report dialog; stderr was empty, proving no QIVEN_ASSERT fired | AUTH | ports are called WITH the governance snapshot as context (`IIdentityVerifier::verify(actor, governanceSource)`); the service resolves context under its own lock via the locked helper; `RecordingVerifier` test | `pit.port_never_reenters_service` | v3 |

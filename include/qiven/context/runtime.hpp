@@ -20,7 +20,7 @@
 namespace qiven::context
 {
 struct Device // [J] pure data; verify live, never cached in cognition
-{
+{             // pit.profiles_family_only: families only, exact values live
     std::string name;
     std::string os;
     std::string env; // "git,gh,MSVC,etc" — families, verify-live
@@ -90,7 +90,7 @@ struct SessionCheckpoint   // PART 4: session sidecar — continuity evidence
     std::string nextAction;
     CheckpointTrigger lastTrigger { CheckpointTrigger::TurnBoundary };
     std::string servingDisclosure; // who actually served the turns
-};
+}; // pit.undisclosed_substitution_flagged: this field is mandatory per turn
 
 struct HumanPreference // owner-side adaptation; session-injected;
 {                      // never alters acceptance topology (R4)

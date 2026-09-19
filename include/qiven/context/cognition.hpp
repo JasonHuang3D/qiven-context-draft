@@ -246,7 +246,8 @@ struct EvidenceRecord // evidence/audits — immutable once written
     std::string content; // PASS/FAIL, identities, digests
 };
 
-struct StateView                 // compact current operational state, TYPED (pit P-15: the
+struct StateView                 // compact current operational state, TYPED (pit P-15 and
+                                 // pit.no_live_refs_in_state: the
 {                                // 2026-09-19 boot found prose state surfaces contradicting
                                  // each other; references make coherence gate-checkable)
     std::string objective;       // the active objective
