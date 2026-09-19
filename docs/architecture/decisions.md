@@ -274,3 +274,33 @@ tool waits.
 checkpoint is written by the loop, not remembered by the model.
 
 **Pinned by.** `pit.checkpoint_survives_turn_loss`, `pit.gaps_recorded_not_synthesized`.
+
+## DR-013 — Ports receive context; they never re-enter the service
+
+**Context.** The 2026-09-19 incident (P-42): the identity port was invoked
+while the service held the admission mutex, and the draft verifier re-entered
+`CanonicalHead()`, re-locking the same non-recursive mutex on the same thread.
+MSVC Debug throws `resource_deadlock_would_occur`; uncaught, the process
+terminated silently (exit 3) behind a modal CRT abort dialog that paused
+unattended runs for human clicks. MSVC Release silently tolerates the re-lock
+(recursion counter) — the same defect, config-divergent manifestation, and
+standards-level undefined behavior either way.
+
+**Decision.** Ports are called with the context they need. `IIdentityVerifier::
+verify(actor, governanceSource)` receives the governance snapshot the service
+resolved under its own lock (internal locked helper); no port signature can
+reach back into the service.
+
+**Rejected alternatives.**
+- *Make the admission mutex recursive (`std::recursive_mutex`).* Rejected: the
+  re-entrancy is the defect; hiding it behind a recursive lock admits arbitrary
+  callback cycles and resurrects the split-brain class the mutex exists to
+  fence.
+- *Catch the system_error in the verifier.* Rejected: catching the symptom of
+  re-entrancy keeps the cycle; the throw is the detector, not the disease.
+
+**Consequences.** Every future port (identity, authority, retrieval backends)
+gets its context as parameters; a port that needs more must say so in its
+signature, which makes the dependency edge reviewable.
+
+**Pinned by.** `pit.port_never_reenters_service` (`RecordingVerifier`).
