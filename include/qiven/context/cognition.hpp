@@ -87,12 +87,69 @@ enum class Lifecycle // decision lifecycle (record-lifecycle contract)
     Rejected,
 };
 
+enum class EpistemicType // constitution §8: hypothesis ≠ fact ≠ observation
+{                        // (review §12: the axis is now a type, not a comment)
+    Observation,
+    Hypothesis,
+    Candidate,
+    Accepted,
+    Verified,
+    Rejected,
+};
+
+enum class Role // canonical authority packages (R4)
+{
+    Owner,
+    Brother,
+    Worker,
+};
+
+enum class Handoff // typed human handoffs (ADR-0036)
+{
+    H_None,              // no handoff required for this operation class
+    H1_Execution,        // owner physically runs the acceptance producer
+    H2_Review,           // owner or DELEGATED reviewer accepts exact delta
+    H3_Authority,        // human succession
+    H4_RecoveryPresence, // cryptographic local presence (ADR-0029)
+};
+
+enum class RetrievalTrigger // constitution §16: a correct engine that is
+{                           // not invoked at transitions is a miss (P-18)
+    ColdBoot,
+    TaskTransition,
+    DomainChange,
+    MaterialTransaction,
+    SessionRollover,
+};
+
+struct SourceType // typed provenance source (constitution #9, review §12)
+{
+    enum class Kind
+    {
+        UserStatement,
+        ChatSession,
+        GitCommit,
+        Audit,
+        RepositoryFile,
+        CiRun,
+    };
+    Kind kind { Kind::UserStatement };
+    std::string reference; // the pointer: commit SHA, file path, session id...
+    std::string note;      // optional context
+};
+
 struct Provenance
-{                                     // every canonical record carries it (const. #9)
-    std::vector<std::string> sources; // user_statement / git_commit / audit / ...
-                                      // transport SHAs are historical facts: live
-                                      // verifiable (Phase B), never required to
-                                      // reconstruct semantics (Phase A)
+{ // every canonical record carries it (const. #9; review §12: typed, not strings)
+    std::vector<SourceType> sources;
+
+    [[nodiscard]] bool empty() const noexcept
+    {
+        return sources.empty();
+    }
+    [[nodiscard]] std::size_t size() const noexcept
+    {
+        return sources.size();
+    }
 };
 
 struct Governance              // authority RULES live here; identities are
@@ -164,11 +221,12 @@ struct Conflict // constitution 11: conflict is first-class epistemic state;
     std::string resolution; // required when Resolved
 };
 
-struct HandoffPolicy // the ADR-0036 classification table, as data
+struct HandoffPolicy // the ADR-0036 classification table, as data;
+                     // expresses ALL four handoff types (review §12)
 {
     OperationClass opClass;
-    bool requiresH2;        // H2_Review evidence over the exact delta
-    bool rootPrincipalOnly; // governance-mutation class
+    Handoff required { Handoff::H2_Review }; // which handoff the class requires
+    bool rootPrincipalOnly;                  // governance-mutation class
 };
 
 struct PolicyTable
@@ -207,6 +265,7 @@ struct MemoryRecord // memory/ — durable facts, lessons, risks
         Superseded,
     };
     Kind kind { Kind::Fact };
+    EpistemicType epistemic { EpistemicType::Observation }; // const. #8: these never collapse
     Status status { Status::Active };
     std::string title;
     std::string statement;
@@ -235,6 +294,8 @@ struct Obligation // obligations/ — unfinished cognition (const. #6)
     };
     Status status { Status::Open };
     TriggerKind trigger { TriggerKind::Manual }; // non-terminal obligations carry one
+    std::string triggerValue;                    // the concrete trigger: a date, a
+                                                 // revision, an event name (review §12)
     std::int64_t id {};                          // canonical repo uses OBL-... string ids
     std::string statement;
     std::string completionCriteria;
@@ -275,21 +336,6 @@ struct ViewSpec                           // DURABLE participant adaptation — 
     std::string summary;                  // what this view adapts
     std::vector<std::string> profileRefs; // preference/environment/workflow refs:
                                           // non-empty, no duplicates (integrity)
-};
-
-enum class Role // canonical authority packages (R4)
-{
-    Owner,
-    Brother,
-    Worker,
-};
-
-enum class Handoff // typed human handoffs (ADR-0036)
-{
-    H1_Execution,        // owner physically runs the acceptance producer
-    H2_Review,           // owner or DELEGATED reviewer accepts exact delta
-    H3_Authority,        // human succession
-    H4_RecoveryPresence, // cryptographic local presence (ADR-0029)
 };
 
 struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
