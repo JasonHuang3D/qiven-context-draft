@@ -98,7 +98,7 @@ int main()
     QCD_CHECK(first == second);
 
     // the restored instance carries the artifact's content identity
-    QCD_CHECK(restored->contentId == DraftContentId(first));
+    QCD_CHECK(restored->digest == DraftSnapshotDigest(first));
     QCD_CHECK(restored->state->decisions.size() == 1);
     QCD_CHECK(restored->state->obligations[0].id == 7);
 

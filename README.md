@@ -6,9 +6,11 @@ always produces mutual interpretive drift, while pointer/value choices, types an
 call graphs state ownership, lifetime and causality exactly. Here, architecture
 rules compile.
 
-**Status: draft.** This is not the production context engine (roadmap order 2,
-`qiven-context.exe` / ContextKernel). It is the design substrate that the K4/K5
-continuity work and the future kernel will be judged against.
+**Status: draft, v3 phase 2C (semantic closure).** This is not the production
+context engine (roadmap order 2). It is the design substrate that the K4/K5
+continuity work and the future kernel are judged against. Architecture docs:
+`docs/architecture/` (requirements, cognition model, process model, decisions,
+pit regression map, invariant inventory, validation profile).
 
 ## Why C++ as the bridge
 
@@ -16,30 +18,39 @@ Any LLM maintaining project context in prose will drift — prose boundaries ero
 with every edit. Types do not drift. A value member versus a pointer member is a
 machine-checkable statement about ownership and lifetime:
 
-- `LLMCognition` is a **pure value tree** — zero pointers to runtime participants.
+- `Snapshot` is a **pure value tree** — zero pointers to runtime participants.
   That single rule makes it snapshot-able, restorable and compressible (K4/K5),
   and doubles as the drift detector: any repo surface that cannot be pointed at
-  as a member of `LLMCognition` is by definition not context (views, device
-  profiles, human preferences, participant bindings are runtime parameters).
-- `std::shared_ptr` answers *lifetime* (who may hold cognition while it is
-  restored); `std::atomic<Epoch>` answers *authority* (which instance may still
-  be written). Conflating them was draft v1's mistake; the split is v2's core.
-- `ReadFromCognition` returns a snapshot **by value**; `WriteToCognition` takes a
-  **delta** and returns `bool`. The LLM never holds a mutable reference to
-  cognition — single-writer is a type signature, not a policy.
+  as a member of `Snapshot` is by definition not context (session bindings,
+  device profiles and resolved views are runtime parameters; DURABLE view and
+  profile declarations ARE context — DR-008).
+- **Three orthogonal identities** (review §3): `SnapshotDigest` (integrity of
+  the canonical bytes), `RevisionId` (storage history identity — a GitStore
+  mints commit OIDs), `GrantId` (runtime authority capability). Never shared.
+- `Materialization` is **immutable** (review §2): a write mints a successor;
+  a pinned handle is a consistent world for a whole Work cycle.
+- `ExecutionGrant` is an **unforgeable minted capability** (review §4):
+  private constructor, move-only; forgery is not expressible.
+- `WriteToCognition` returns a **typed `Verdict`** whose refusal reason maps to
+  a recovery rule stored IN cognition (recovery-as-data). The store returns
+  typed receipts: a CAS failure and a lost acknowledgement are different worlds.
+- The `ContextBundle` carries **semantic floors** (constitution articles,
+  governance, open obligations, negative knowledge, boundaries) that survive any
+  token budget; the budget shrinks typed candidates only, with omissions
+  explained, and every bundle is stamped `authorization: not_granted`.
 
 ## The persistence question (why git, and why git is optional)
 
-The repository stores the **serialized `LLMCognition` itself**. Therefore the
-entire persistence requirement is one small contract — any data storage with
-incremental read/write suffices:
+The repository stores the **serialized `Snapshot` itself**. The entire
+persistence requirement is one small contract — any data storage with
+compare-and-swap on revisions suffices:
 
 ```cpp
 struct ICognitionStore {
-    ContentId   append(const Bytes& stateBytes, const ContentId& base); // incremental write
-    Bytes       materialize(const ContentId& id) const;                 // read state at content id
-    Bytes       readDelta(const ContentId& base, const ContentId& target) const; // incremental read
-    bool        verify(const ContentId& id) const;                      // existence
+    StoreReceipt compareAndSwap(const RevisionId& base, const Bytes& state); // typed CAS
+    Bytes       materialize(const RevisionId& revision) const;
+    bool        verify(const RevisionId& revision) const;
+    RevisionId  head() const;
 };
 ```
 
@@ -50,46 +61,43 @@ Git is today's transport implementation, nothing more:
 
 | Store contract | git implementation |
 | --- | --- |
-| `append(state, base)` | commit (parent = head; `ContentId` = commit SHA) |
-| `materialize(id)` | checkout / cat-file at that SHA |
-| `readDelta(base, target)` | fetch/pack between two SHAs (transport optimization) |
-| `verify(id)` | cat-file -e |
+| `compareAndSwap(base, state)` | commit with parent = base (RevisionId = commit OID); CompareFailed = non-fast-forward |
+| `materialize(revision)` | checkout / cat-file at that OID |
+| `verify(revision)` | cat-file -e |
+| `head()` | rev-parse HEAD |
 
 Layered **transport ceremonies** are not part of the store contract: push/pull =
-replica sync; PR + review + merge = the H2 acceptance ceremony over the
-human-AI channel; **GitHub is a second device** (a cloud device running CI) that
-validates appended states, with the resulting evidence flowing back into
-cognition through ordinary gated transactions.
-
-`ContentId` is content-addressed identity (SHA-256 in production; a draft FNV-1a
-here). A git commit SHA is one minter of `ContentId`; a K4 handoff-artifact
-digest is another. Provenance records may cite SHAs as historical transport
-facts — verifiable live (Phase B), never required for semantic reconstruction
-(Phase A).
+replica sync; PR + review + merge = the H2 acceptance ceremony over the human-AI
+channel; **GitHub is a second device** (a cloud device running CI) that
+validates appended states, with the evidence flowing back into cognition through
+ordinary gated transactions.
 
 ## Architecture rules (R1–R6)
 
-1. `LLMCognition` is a pure value tree — zero pointers to runtime (drift detector).
-2. Cognition swap is atomic with respect to `Work()` — fencing epoch, rebind
-   before retire; lock the admission, never the work.
+1. `Snapshot` is a pure value tree — zero pointers to runtime (drift detector).
+2. Cognition swap is atomic with respect to `Work()` — the writer lease and the
+   base revision fence; lock the admission, never the work.
 3. Participant change (model / tool / device / human) is a pointer rebind — O(1),
-   never a cognition write.
-4. Authority **rules** live in cognition; identities are session parameters
-   verified against the governance principal.
-5. `Work()` side effects = result + gated delta write + tool calls. Nothing else.
-6. Restore is pure materialization + runtime rebind; only the delta write is gated.
+   never a cognition write — and the runtime authority layer validates the
+   rebound graph (edges + disclosure) without changing cognition.
+4. Authority **rules** live in cognition as data (`PolicyTable`: operation class
+   → required handoff; refusal reason → mandated recovery); identities are
+   session parameters verified against the governance principal.
+5. `Work()` side effects = result + gated transaction + tool calls. Nothing else.
+6. Restore is pure materialization + runtime rebind; only the delta write is
+   gated, and a restored instance is quarantined until a governed cutover.
 
 ## Layout
 
 ```
-include/qiven/context/cognition.hpp     value tree: records, governance, state
-include/qiven/context/persistence.hpp   ICognitionStore, MemoryStore, GitStore sketch,
-                                        QivenContext (fencing + admission + gates)
+include/qiven/context/cognition.hpp     value tree: records, governance, policy, views
+include/qiven/context/persistence.hpp   ICognitionStore, Materialization, ExecutionGrant,
+                                        QivenContext (grants, gates, bundles)
 include/qiven/context/runtime.hpp       Device, RemoteDevice, LLM, LLMClientTool, Human
-include/qiven/context/context.hpp       umbrella header
 src/                                    persistence (serialization, gates) + runtime
 apps/cognition_loop.cpp                 runnable demo of the whole loop
-tests/                                  value-tree checks, fencing gates, store contract
+tests/                                  value-tree checks, fencing/pit suite, store contract
+docs/architecture/                      the design corpus (see its README)
 ```
 
 ## Build (Windows / VS2022, mirrors qiven-math conventions)
@@ -108,7 +116,7 @@ override with `QIVEN_FOUNDATION_ROOT`).
 
 - Canonical project cognition: `JasonHuang3D/qiven-context`
 - Conventions: `qiven-devkit` templates as applied by `qiven-foundation` / `qiven-math`
-- Design lineage: draft v0 (Jason), v1–v2 (ZCode+Jason pairing), this repository
+- Design lineage: draft v0 (Jason), v1–v2 (ZCode+Jason pairing), v3 phases 1–2C
 
 ## Agent notes
 
@@ -116,4 +124,5 @@ AGENTS.md is Devkit-managed. Draft discipline: semantics live in headers with
 short normative comments; `GitStore` stays a documented sketch (the store
 contract is proven by `MemoryStore`); do not introduce serialization libraries,
 networking or a YAML parser — this draft proves the architecture, not the
-transport.
+transport. The pit regression suite is sacred: every recorded scar keeps its
+named test ("scars compile").
