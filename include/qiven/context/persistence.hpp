@@ -24,6 +24,7 @@
 // ============================================================================
 
 #include <qiven/context/cognition.hpp>
+#include <qiven/memory/observer.hpp>
 
 #include <atomic>
 #include <cstddef>
