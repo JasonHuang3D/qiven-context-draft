@@ -47,7 +47,7 @@ int main()
     snapshot.governance.rootPrincipal = "github:JasonHuang3D";
     snapshot.constitution.articles    = { "History is not overwritten",
                                           "Session independence is mandatory" };
-    snapshot.policy.handoff           = { HandoffPolicy { OperationClass::DecisionAcceptance, true, false } };
+    snapshot.policy.handoff           = { HandoffPolicy { OperationClass::DecisionAcceptance, Handoff::H2_Review, false } };
     snapshot.policy.recovery          = { RecoveryRule { RefusalReason::StaleBase,
                                                 RecoveryAction::RereadRethink } };
     snapshot.state.objective          = "qiven-context continuity and kernel design";
@@ -61,14 +61,16 @@ int main()
                                             "typed human handoffs",
                                             {},
                                             {},
-                                            Provenance { { "user_statement" } } });
+                                            Provenance { std::vector<SourceType> { SourceType { SourceType::Kind::UserStatement, "user_statement", "" } } } });
     snapshot.memory.push_back(MemoryRecord { MemoryRecord::Kind::NegativeKnowledge,
+                                             EpistemicType::Verified,
                                              MemoryRecord::Status::Active,
                                              "rejected alternative",
                                              "event-sourcing was rejected: state-replication only",
-                                             {} });
+                                             Provenance { std::vector<SourceType> { SourceType { SourceType::Kind::UserStatement, "ADR-0033-alternatives", "" } } } });
     snapshot.obligations.push_back(Obligation { Obligation::Status::Open,
                                                 Obligation::TriggerKind::OnTouch,
+                                                "",
                                                 7,
                                                 "upgrade chatgpt-jason view",
                                                 "schema v2 landed" });

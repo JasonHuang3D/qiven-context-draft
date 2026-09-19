@@ -122,7 +122,7 @@ int main()
     // integrity digest and the storage revision, and they are different types
     std::printf("genesis digest: %s revision: %s\n", c1->digest.value.c_str(),
                 c1->revision.value.c_str());
-    QCD_CHECK(c1->digest == SnapshotDigest { "snap-ae811bad8dada212" }); // pit.golden_vector_pinned (v5 genesis format)
+    QCD_CHECK(c1->digest == SnapshotDigest { "snap-2709358ddc94d185" }); // pit.golden_vector_pinned (v5 genesis format)
     QCD_CHECK(!IsEmpty(c1->revision));
 
     // pit.port_never_reenters_service (P-42): the identity port receives the
@@ -530,7 +530,7 @@ int main()
         addEvidence.base = w->revision;
         addEvidence.operations.push_back(Operation { .kind    = Operation::Kind::AddEvidence,
                                                      .scope   = "",
-                                                     .title   = "snap-ae811bad8dada212",
+                                                     .title   = "snap-2709358ddc94d185",
                                                      .payload = "genesis golden vector pinned" });
         QCD_CHECK(QivenContext::write_to_cognition(w, addEvidence, *g2).outcome == Verdict::Outcome::Applied);
     }
