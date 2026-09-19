@@ -1,6 +1,7 @@
 // ============================================================================
-// cognition_loop — runnable demo of the whole architecture:
-// boot -> Work cycles through the gated write -> restore -> continue check
+// cognition_loop — runnable demo of the v3 architecture:
+// boot -> grant -> Work cycles through the gated write (typed verdicts and
+// recovery-as-data) -> reader boot preserves the writer -> restore quarantined
 // ============================================================================
 
 #include <qiven/context/context.hpp>
@@ -13,28 +14,18 @@ using namespace qiven::context;
 
 namespace
 {
-TransactionDelta addLesson(const std::string& statement)
+AuthenticatedActor demoActor()
 {
-    TransactionDelta delta;
-    delta.kind    = TransactionDelta::Kind::AddMemoryRecord;
-    delta.title   = "draft-lesson";
-    delta.payload = statement;
-    return delta;
+    return AuthenticatedActor { "github:JasonHuang3D", Role::Worker, "glm-5.3-flash",
+                                "GLM-5.3-Flash", "max" };
 }
 
-TransactionDelta acceptDecision(std::int64_t id, bool withHandoff)
+ContextTransaction addLesson(const std::string& statement)
 {
-    TransactionDelta delta;
-    delta.kind     = TransactionDelta::Kind::AppendDecision;
-    delta.recordId = id;
-    delta.title    = "ADR-draft";
-    delta.payload  = "accept the executable cognition specification";
-    if (withHandoff)
-    {
-        delta.handoff            = Handoff::H2_Review; // delegated review evidence (ADR-0036)
-        delta.handoffEvidenceRef = "PR-record review";
-    }
-    return delta;
+    ContextTransaction transaction;
+    transaction.operations.push_back(
+        Operation { Operation::Kind::AddMemory, 0, "draft-lesson", statement });
+    return transaction;
 }
 } // namespace
 
@@ -43,7 +34,8 @@ int main()
     auto store = std::make_shared<MemoryStore>();
     QivenContext::attachStore(store);
 
-    // cold boot: empty store -> genesis cognition (governance + constitution)
+    // cold boot: empty store -> genesis cognition (governance + constitution
+    // + the authority policy table)
     CognitionSource boot;
     boot.kind      = CognitionSourceKind::CanonicalRemote;
     const auto cog = QivenContext::CreateCognition(boot);
@@ -54,8 +46,8 @@ int main()
     auto llm            = std::make_shared<LLM>();
     llm->name           = "GLM-5.3-Flash";
     llm->pCognition     = cog;
-    llm->deltaGenerator = [](const std::string&, const LLMCognition&) {
-        return addLesson("qiven-context-draft v2 runs the full cognition loop");
+    llm->deltaGenerator = [](const std::string&, const Snapshot&) {
+        return addLesson("qiven-context-draft v3 phase 1 runs the full cognition loop");
     };
 
     auto device  = std::make_shared<Device>();
@@ -63,53 +55,67 @@ int main()
     device->os   = "Windows11";
     device->env  = "git,gh,MSVC,etc";
 
-    auto client          = std::make_shared<LLMClientTool>();
-    client->name         = "zcode-desktop";
-    client->pCurrentLLM  = llm;
-    client->pTargeDevice = device;
-    client->binding      = ParticipantBinding { Role::Worker, "glm-5.3-flash" };
+    auto client           = std::make_shared<LLMClientTool>();
+    client->name          = "zcode-desktop";
+    client->pCurrentLLM   = llm;
+    client->pTargetDevice = device;
+    client->binding       = ParticipantBinding { Role::Worker, "glm-5.3-flash" };
 
     auto human               = std::make_shared<Human>();
     human->name              = "Jason";
-    human->verifiedPrincipal = "github:JasonHuang3D"; // session-injected, verified (R4)
+    human->verifiedPrincipal = "github:JasonHuang3D"; // session-injected, verified at the port (R4)
 
     std::string result;
     // cycle 1: supervised mutating write — passes every gate
-    llm->Work("run the draft loop", result);
+    human->UseLLMToWork(client, "run the draft loop", result);
     std::printf("[ %s ] cycle1      %s\n", llm->parkedDeltas.empty() ? "OK" : "FAIL", result.c_str());
 
-    // cycle 2: unattended mutating write — refused (ADR-0036: read-only default)
-    llm->Work("background maintenance", result, WorkMode::Unattended);
-    std::printf("[ OK ] cycle2      %s (unattended write refused)\n", result.c_str());
+    // cycle 2: unattended mutating write — refused; recovery = defer (ADR-0036)
+    human->UseLLMToWork(client, "background maintenance", result);
+    std::printf("[ OK ] cycle2      %s\n", result.c_str());
 
-    // cycle 3: decision acceptance without the typed H2 evidence — refused
-    llm->deltaGenerator = [](const std::string&, const LLMCognition&) {
-        return acceptDecision(37, false);
+    // cycle 3: decision acceptance without the typed H2 evidence — refused;
+    // recovery = halt and escalate, retry forbidden
+    llm->deltaGenerator = [](const std::string&, const Snapshot&) {
+        ContextTransaction transaction;
+        transaction.operations.push_back(Operation { Operation::Kind::AppendDecision, 37,
+                                                     "ADR-draft", "accept the specification" });
+        return transaction;
     };
-    llm->Work("accept without review", result);
-    std::printf("[ OK ] cycle3      %s (H2 missing -> refused)\n", result.c_str());
+    human->UseLLMToWork(client, "accept without review", result);
+    std::printf("[ OK ] cycle3      %s\n", result.c_str());
 
-    // cycle 4: with the H2 evidence — accepted; the durable token advances
-    llm->deltaGenerator = [](const std::string&, const LLMCognition&) {
-        return acceptDecision(37, true);
+    // cycle 4: with content-bound H2 evidence — accepted; the durable token advances
+    llm->deltaGenerator = [](const std::string&, const Snapshot&) {
+        ContextTransaction transaction;
+        transaction.operations.push_back(Operation { Operation::Kind::AppendDecision, 37,
+                                                     "ADR-draft", "accept the specification" });
+        transaction.handoffEvidenceRef = "PR-record review";
+        H2Evidence evidence;
+        evidence.reviewer            = "github:JasonHuang3D";
+        evidence.reviewRef           = "brother-review";
+        evidence.reviewedDeltaDigest = DigestOperations(transaction.operations);
+        transaction.h2               = evidence;
+        return transaction;
     };
-    llm->Work("accept with review", result);
-    std::printf("[ %s ] cycle4      %s\n", llm->parkedDeltas.size() == 2 ? "OK" : "FAIL",
+    human->UseLLMToWork(client, "accept with review", result);
+    std::printf("[ %s ] cycle4      %s\n", result.find("delta applied") != std::string::npos ? "OK" : "FAIL",
                 result.c_str());
 
-    // restore: materialize NEW, rebind, THEN retire (R2 ordering — no dangling window)
+    // restore: materialize NEW, rebind, THEN retire (R2 ordering — no dangling
+    // window). The reader boot does NOT revoke the writer (DR-010) — the cycle
+    // above already proved the write survived a second materialization.
     CognitionSource freshSource;
     freshSource.kind = CognitionSourceKind::CanonicalRemote; // empty id = store head
     const auto fresh = QivenContext::CreateCognition(freshSource);
     llm->pCognition  = fresh;
     QivenContext::RetireCognition(cog);
     std::printf("[ OK ] restore     epoch=%llu decisions=%zu memory=%zu\n",
-                static_cast<unsigned long long>(fresh->epoch), fresh->decisions.size(),
-                fresh->memory.size());
+                static_cast<unsigned long long>(fresh->epoch), fresh->state->decisions.size(),
+                fresh->state->memory.size());
 
     // continuation check — the only whole-graph predicate
-    if (!QivenContext::IsContinueable(human.get(), client.get(), device.get(), llm.get(),
-                                      fresh.get()))
+    if (!QivenContext::IsContinueable(human.get(), client.get(), device.get(), llm.get(), fresh))
     {
         std::printf("[FAIL] continueable\n");
         return 1;
@@ -117,19 +123,33 @@ int main()
     std::printf("[ OK ] continueable\n");
 
     // K4 path: artifact materialization is quarantined — restores cognition but
-    // cannot write until a governed authority cutover
-    const Bytes artifact = QivenContext::ReadFromCognition(fresh.get(), Query {});
+    // cannot write until a governed authority cutover; corruption fails closed
+    const Bytes artifact = QivenContext::ReadFromCognition(fresh, Query {});
     CognitionSource artifactSource;
-    artifactSource.kind        = CognitionSourceKind::HandoffArtifact;
-    artifactSource.inlineBytes = artifact;
-    const auto restored        = QivenContext::CreateCognition(artifactSource);
-    TransactionDelta mutation  = addLesson("mutate a quarantined restore");
-    mutation.base              = restored->contentId;
-    const bool allowed         = QivenContext::WriteToCognition(restored.get(), mutation,
-                                                                WorkMode::SupervisedForeground);
+    artifactSource.kind           = CognitionSourceKind::HandoffArtifact;
+    artifactSource.inlineBytes    = artifact;
+    artifactSource.expectedDigest = DraftContentId(artifact);
+    const auto restored           = QivenContext::CreateCognition(artifactSource);
+    const auto grant              = QivenContext::AcquireGrant(demoActor(), WorkMode::SupervisedForeground);
+    const bool allowed            = grant.has_value() && QivenContext::WriteToCognition(restored, addLesson("mutate a quarantined restore"), *grant).outcome == Verdict::Outcome::Applied;
     std::printf("[ %s ] k4-quarantine write %s\n", allowed ? "FAIL" : "OK",
                 allowed ? "allowed" : "refused");
 
-    std::printf("[ OK ] qiven-context-draft loop complete\n");
-    return allowed ? 1 : 0;
+    Bytes corrupted = artifact;
+    corrupted[corrupted.size() / 2] ^= std::byte { 0xFF };
+    CognitionSource corruptedSource;
+    corruptedSource.kind           = CognitionSourceKind::HandoffArtifact;
+    corruptedSource.inlineBytes    = corrupted;
+    corruptedSource.expectedDigest = DraftContentId(artifact);
+    const auto broken              = QivenContext::CreateCognition(corruptedSource);
+    std::printf("[ %s ] corrupt artifact restore %s\n", broken ? "FAIL" : "OK",
+                broken ? "accepted" : "failed closed");
+    if (grant.has_value())
+    {
+        QivenContext::ReleaseGrant(*grant);
+    }
+
+    const bool ok = !allowed && broken == nullptr;
+    std::printf("[ %s ] qiven-context-draft loop complete\n", ok ? "OK" : "FAIL");
+    return ok ? 0 : 1;
 }

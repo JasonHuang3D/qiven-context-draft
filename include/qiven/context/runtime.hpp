@@ -5,8 +5,9 @@
 //
 // Participant changes (model / tool / device / human) are pointer rebinds —
 // O(1), never a cognition write (R3). The LLM is blind to Device/Human/Client
-// by construction (R5): its only side effects are result + gated delta write
-// + tool calls.
+// by construction (R5): its only side effects are result + gated transaction
+// + tool calls. Participants hold shared_ptr<const Materialization>: they can
+// read and propose, never mutate (DR-001).
 // ============================================================================
 
 #include <qiven/context/persistence.hpp>
@@ -40,7 +41,7 @@ struct ParticipantBinding       // runtime; CANNOT live in cognition (R1/R3)
 
 struct SessionCheckpoint   // PART 4: session sidecar — continuity evidence
 {                          // only, never canonical (const. #5); NOT a
-    std::string sessionId; // cognition member. includes serving-model
+    std::string sessionId; // Snapshot member. includes serving-model
     std::string exactTask; // identity (disclosure duty, ADR-0035 rule 4)
     std::vector<ContentId> acceptedRefs;
     std::vector<ContentId> unacceptedCandidates;
@@ -56,33 +57,38 @@ struct HumanPreference // owner-side adaptation; session-injected;
 
 struct LLM
 {
-    std::string name;                         // value: intrinsic identity ("GPT5")
-    std::shared_ptr<LLMCognition> pCognition; // lifetime pinned per Work cycle
-                                              // (shared_ptr); authority fenced (epoch)
+    std::string name;           // value: intrinsic identity ("GPT5")
+    CognitionHandle pCognition; // lifetime pinned per Work cycle;
+                                // const: cognition is not mutable
+                                // through participants (DR-001)
     // draft hooks — production replaces with real reasoning + tool runtime
     std::function<Query(const std::string&)> queryBuilder;
-    std::function<TransactionDelta(const std::string&, const LLMCognition&)> deltaGenerator;
+    std::function<ContextTransaction(const std::string&, const Snapshot&)> deltaGenerator;
 
-    SessionCheckpoint checkpoint;               // sidecar this session owns (v8-style)
-    std::vector<TransactionDelta> parkedDeltas; // rejected-but-held deltas (never lost)
+    SessionCheckpoint checkpoint;                 // sidecar this session owns (v9-style)
+    std::vector<ContextTransaction> parkedDeltas; // refused-but-held deltas
+                                                  // (StaleBase recovery only)
 
     // one causal Work cycle — the numbered order is normative:
-    void Work(const std::string& prompt, std::string& result,
+    // acquire grant -> read -> think -> propose -> gated write ->
+    // recovery-table next action (DR-002: the model never chooses its own
+    // recovery; the policy table in cognition does)
+    void Work(const std::string& prompt, const AuthenticatedActor& actor, std::string& result,
               WorkMode mode = WorkMode::SupervisedForeground);
 };
 
 struct LLMClientTool // the relay; NO cognition access (R5)
 {
-    std::string name;                     // "chatGPT" / "zcode-desktop" / ...
-    std::shared_ptr<LLM> pCurrentLLM;     // rebindable (model switch)
-    std::shared_ptr<Device> pTargeDevice; // rebindable (device migration)
-    ParticipantBinding binding;           // current runtime binding (rebindable)
+    std::string name;                      // "chatGPT" / "zcode-desktop" / ...
+    std::shared_ptr<LLM> pCurrentLLM;      // rebindable (model switch)
+    std::shared_ptr<Device> pTargetDevice; // rebindable (device migration)
+    ParticipantBinding binding;            // current runtime binding (rebindable)
     bool operational { true };
 
-    bool ControlLLMFromHuman(const std::string& prompt)
+    bool ControlLLMFromHuman(const AuthenticatedActor& actor, const std::string& prompt,
+                             std::string& result)
     {
-        std::string result;
-        pCurrentLLM->Work(prompt, result);
+        pCurrentLLM->Work(prompt, actor, result);
         WaitForLLM();                   // async: dispatch != completion (v5 lesson)
         return CollectFeedBack(result); // relay itself is fallible (UI-send incident)
     }
@@ -103,13 +109,16 @@ struct Human // all-value, zero pointers — the most
     std::string name;
     std::vector<HumanPreference> preferences;
     std::string verifiedPrincipal; // session-injected identity, verified against
-                                   // governance rootPrincipal (R4)
+                                   // governance rootPrincipal at the port (R4)
 
-    bool UseLLMToWork(const std::shared_ptr<LLMClientTool>& pClient,
-                      const HumanPreference& pref, const std::string& prompt) const
+    bool UseLLMToWork(const std::shared_ptr<LLMClientTool>& pClient, const std::string& prompt,
+                      std::string& result) const
     {
-        static_cast<void>(pref); // draft: preferences adapt presentation only
-        return pClient->ControlLLMFromHuman(prompt);
+        // the actor's identity comes from the human's verified principal; the
+        // role/binding/serving disclosure come from the client-tool binding
+        AuthenticatedActor actor { verifiedPrincipal, pClient->binding.role,
+                                   pClient->binding.modelId, "draft-demo-model", "standard" };
+        return pClient->ControlLLMFromHuman(actor, prompt, result);
     }
 };
 } // namespace qiven::context

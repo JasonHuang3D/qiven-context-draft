@@ -1,12 +1,18 @@
 #pragma once
 
 // ============================================================================
-// cognition.hpp — the LLMCognition value tree (PART 1 of the architecture)
+// cognition.hpp — the Snapshot value tree + authority policy data (PART 1)
 //
-// R1: LLMCognition is a PURE VALUE TREE. Zero pointers, zero references to
-//     runtime participants. This is what makes it snapshot-able, restorable
-//     and compressible (K4/K5), and it is the drift detector: a repo surface
-//     that cannot be pointed at as a member below is not context.
+// R1: Snapshot is a PURE VALUE TREE. Zero pointers, zero references to
+//     runtime participants — snapshot-able, restorable, compressible (K4/K5),
+//     and the drift detector: a surface that cannot be a member below is not
+//     context.
+//
+// v3 phase 1 (DR-001/002/005): the tree no longer carries epoch/contentId —
+// runtime identity and authority live in Materialization (persistence.hpp).
+// The PolicyTable makes R4 real: authority rules are cognition DATA the gate
+// interprets, and every refusal carries the recovery rule the loop must
+// follow (recovery-as-data, not comments).
 // ============================================================================
 
 #include <cstdint>
@@ -42,13 +48,65 @@ struct Provenance
 struct Governance              // authority RULES live here; identities are
 {                              // session parameters verified at runtime (R4)
     PrincipalId rootPrincipal; // "github:JasonHuang3D"
-    // role -> authority table and account-level auth semantics: prose contracts
-    // in qiven-context; future ADR formalizes the structured form
 };
 
 struct Constitution // meta-rules about cognition itself (const. #4 #5 #13...)
 {
-    std::vector<std::string> articles; // 18 article titles; full text stays canonical
+    std::vector<std::string> articles; // full article texts: completeness lives
+                                       // in the tree, economy in the Bundle (DR-007)
+};
+
+// --- authority policy as cognition data (DR-002 / DR-005) --------------------
+
+enum class RefusalReason
+{
+    GrantRefused,       // a competing flow holds the single-writer lease (P-01)
+    UnverifiedActor,    // the identity port refused the actor (P-02)
+    StaleBase,          // durable divergence: re-read before writing
+    HandoffMissing,     // policy requires typed handoff evidence; none given
+    HandoffInvalid,     // evidence not bound to this exact delta (P-05)
+    UnattendedMutation, // unattended grants carry no write right (P-08)
+    InvariantFailed,    // record invariant violated: design review, not patch
+    GovernanceDenied,   // quarantined state or policy refuses this actor/op
+    StoreDiverged,      // store-level CAS failed: fail closed
+    OutcomeUnresolved,  // commit outcome unknown: dependent work stops
+};
+
+enum class RecoveryAction
+{
+    RereadRethink,     // park the delta, re-read, re-think; never blind-retry
+    HaltEscalate,      // stop and escalate; retrying is forbidden (no-verbal-waiver)
+    DeferToSupervised, // park until a supervised session can act
+    DesignReview,      // known hazard class: review, not mechanical patch (const. #17)
+    FailClosed,        // stop; competing flow / policy / store refusal
+    Block,             // outcome unknown: dependent mutations stop
+};
+
+struct RecoveryRule
+{
+    RefusalReason reason;
+    RecoveryAction action;
+};
+
+enum class OperationClass
+{
+    DecisionAcceptance, // merge-class semantics
+    MemoryWrite,
+    ObligationWrite,
+    StateUpdate,
+};
+
+struct HandoffPolicy // the ADR-0036 classification table, as data
+{
+    OperationClass opClass;
+    bool requiresH2;        // H2_Review evidence over the exact delta
+    bool rootPrincipalOnly; // governance-mutation class
+};
+
+struct PolicyTable
+{
+    std::vector<HandoffPolicy> handoff;
+    std::vector<RecoveryRule> recovery;
 };
 
 // --- records ---------------------------------------------------------------
@@ -143,35 +201,15 @@ enum class Handoff // typed human handoffs (ADR-0036)
     H4_RecoveryPresence, // cryptographic local presence (ADR-0029)
 };
 
-struct CollaborationRule // v0 TODO "more specific rules" — form starts here
-{
-    enum class Domain
-    {
-        GitWorkflow,
-        Validation,
-        HandoffBoundary,
-        ExecutionMode,
-        Operator,
-        DcrHost,
-    };
-    Domain domain { Domain::GitWorkflow };
-    std::string rule; // TODO(structure): prose -> machine-checkable constraint
-};
-
-struct LLMCognition // PURE VALUE TREE — zero pointers, ever (R1)
-{
-    const Epoch epoch;   // runtime fencing token; immutable per instance
-    ContentId contentId; // content identity of the current state; advances on
-                         // every accepted write — the DURABLE fencing token
-                         // (same concept as epoch, persistence layer)
+struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
+{               // copyable; immutable once minted (DR-001)
     Governance governance;
     Constitution constitution;
-    std::vector<CollaborationRule> collaborations;
+    PolicyTable policy;
     State state;
     std::vector<Decision> decisions;
     std::vector<MemoryRecord> memory;
     std::vector<Obligation> obligations;
     std::vector<EvidenceRecord> evidence;
-    // nothing else. devices/preferences/bindings CANNOT appear here (R1/R3).
 };
 } // namespace qiven::context

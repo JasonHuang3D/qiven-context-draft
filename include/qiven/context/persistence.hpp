@@ -1,17 +1,21 @@
 #pragma once
 
 // ============================================================================
-// persistence.hpp — PART 2: the store contract, QivenContext service
+// persistence.hpp — PART 2: store contract, materialization, gated service
 //
-// The repository stores the serialized LLMCognition itself. The ENTIRE
-// persistence requirement is ICognitionStore — any data storage with
-// incremental append/read suffices. Git is one implementation; a K4 artifact
-// and a K5 stream are others. State-replication, not event-sourcing: recovery
-// reads the canonical snapshot, never replays diffs or commit graphs.
-//
-// Concurrency (v2): lock the ADMISSION, never the WORK.
-//   locked    : CreateCognition / WriteToCognition / RetireCognition (one mutex)
-//   lock-free : ReadFromCognition (immutable snapshot), IsContinueable (atomic load)
+// v3 phase 1 (DR-001/002/003/004/009/010):
+//  - Snapshot is immutable; Materialization carries runtime identity and
+//    authority. Participants hold shared_ptr<const Materialization> — the
+//    LLM never holds a mutable reference to cognition, as a type shape.
+//  - Writes take an ExecutionGrant minted by the in-process authority: one
+//    active grant chain-wide (a second acquire is refused fail-closed — the
+//    split-brain pit), base CAS (durable fencing), the policy table, and
+//    content-bound H2 evidence. Every refusal is a typed Verdict whose reason
+//    maps to a recovery rule stored IN cognition.
+//  - Untrusted deserialization fails closed with typed errors — never asserts
+//    (which compile away in Release).
+//  - epoch fences the writer lease (DR-010); re-materializing for reading
+//    never revokes a writer.
 // ============================================================================
 
 #include <qiven/context/cognition.hpp>
@@ -36,6 +40,10 @@ using Bytes = std::vector<std::byte>; // draft serialization payload (versioned 
 
 // draft content hashing (FNV-1a hex); production mints SHA-256 ContentIds
 [[nodiscard]] ContentId DraftContentId(const Bytes& stateBytes);
+
+// canonical serialization of one snapshot — the export primitive (K4 shape);
+// deterministic for the same snapshot and serialization version
+[[nodiscard]] Bytes SerializeSnapshot(const Snapshot& snapshot);
 
 // --- store contract: the ENTIRE persistence requirement ---------------------
 
@@ -98,7 +106,148 @@ public:
     [[nodiscard]] ContentId head() const override;
 };
 
-// --- read/write shapes ------------------------------------------------------
+// --- materialization (DR-001 / DR-010) ---------------------------------------
+
+enum class QuarantineState
+{
+    Isolated,         // restored from an artifact; non-authoritative (K4)
+    Verified,         // integrity and completeness validated; still non-authoritative
+    AuthorityPending, // a governed cutover has been proposed
+    Promoted,         // authoritative via the governed promotion operation only
+};
+
+struct Materialization
+{
+    std::shared_ptr<const Snapshot> state; // immutable value tree
+    ContentId contentId;                   // durable fencing token
+    Epoch epoch { 0 };                     // runtime fencing token (writer lease)
+    QuarantineState quarantine { QuarantineState::Isolated };
+};
+using CognitionHandle = std::shared_ptr<const Materialization>;
+
+// --- typed failure channels (DR-009): untrusted input never asserts ----------
+
+struct DeserializeError
+{
+    enum class Kind
+    {
+        Truncated,      // input ends inside a field, or trailing bytes remain
+        BadVersion,     // serialization version mismatch
+        BadEnum,        // encoded value outside the declared enum range
+        ResourceAbuse,  // declared counts would allocate unbounded state
+        DigestMismatch, // artifact bytes do not match the declared content id (K4)
+    };
+    Kind kind { Kind::Truncated };
+    std::size_t offset { 0 };
+    std::string detail;
+};
+
+struct DeserializeResult
+{
+    bool ok { false };
+    Snapshot snapshot;
+    DeserializeError error;
+};
+
+// --- work modes, actors, grants (DR-003) --------------------------------------
+
+enum class WorkMode
+{
+    SupervisedForeground, // owner-launched, owner-visible session
+    Unattended,           // scheduled/idle: read-only default (ADR-0036)
+};
+
+struct AuthenticatedActor
+{
+    PrincipalId principal; // verified by the identity port, never self-asserted
+    Role role { Role::Worker };
+    std::string binding;      // which model instance fulfills the role
+    std::string servingModel; // disclosure duty (ADR-0035 rule 4)
+    std::string reasoning;    // serving reasoning effort
+};
+
+[[nodiscard]] inline bool operator==(const AuthenticatedActor& a, const AuthenticatedActor& b)
+{
+    return a.principal == b.principal && a.role == b.role && a.binding == b.binding && a.servingModel == b.servingModel && a.reasoning == b.reasoning;
+}
+
+struct ExecutionGrant
+{
+    Epoch epoch { 0 };
+    PrincipalId principal;
+    WorkMode mode { WorkMode::SupervisedForeground };
+};
+
+[[nodiscard]] inline bool operator==(const ExecutionGrant& a, const ExecutionGrant& b)
+{
+    return a.epoch == b.epoch && a.principal == b.principal && a.mode == b.mode;
+}
+
+// identity port: verification happens here, never by caller assertion. Ports
+// are called WITH the governance snapshot the service supplies and NEVER
+// re-enter QivenContext (pit P-42 — the 2026-09-19 incident: a verifier that
+// called CanonicalHead() re-locked the admission mutex on the same thread and
+// threw resource_deadlock_would_occur; uncaught, it terminated silently).
+// Production verifies against the live identity provider and re-checks at
+// commit time (ADR-0033 section 4).
+class IIdentityVerifier
+{
+public:
+    virtual ~IIdentityVerifier()                                              = default;
+    [[nodiscard]] virtual bool verify(const AuthenticatedActor& actor,
+                                      const Snapshot& governanceSource) const = 0;
+};
+
+// --- transactions and verdicts (DR-002 / DR-004 / DR-005) ---------------------
+
+struct Operation
+{
+    enum class Kind
+    {
+        AppendDecision,   // policy class: DecisionAcceptance (merge-class)
+        AddMemory,        // MemoryWrite
+        UpsertObligation, // ObligationWrite
+        CloseObligation,  // ObligationWrite
+        UpdateState,      // StateUpdate
+    };
+    Kind kind { Kind::AddMemory };
+    std::int64_t recordId { 0 }; // decision id / obligation id, per kind
+    std::string title;
+    std::string payload;
+};
+
+struct H2Evidence // content-bound review evidence (DR-004, pit P-05)
+{
+    ContentId reviewedDeltaDigest; // over the serialized ordered operations
+    PrincipalId reviewer;          // the delegated reviewer's principal
+    std::string reviewRef;         // transport pointer: PR record / audit id
+};
+
+struct ContextTransaction
+{
+    ContentId base;                    // durable fencing token: the state my thinking assumed
+    std::vector<Operation> operations; // atomic; validated as a whole, applied as a whole
+    std::string handoffEvidenceRef;    // transport pointer (PR record / audit id)
+    std::optional<H2Evidence> h2;      // present iff the policy table requires it
+};
+
+// content identity of the ordered operations — what an H2 review binds to
+[[nodiscard]] ContentId DigestOperations(const std::vector<Operation>& operations);
+
+struct Verdict // the write gate's typed outcome (DR-002); a bool erases the
+{              // recovery rule — the reason IS cognition
+    enum class Outcome
+    {
+        Applied,
+        Refused,
+        OutcomeUnknown, // produced by Phase 2 receipts; reserved here
+    };
+    Outcome outcome { Outcome::Refused };
+    RefusalReason reason { RefusalReason::StoreDiverged };
+    ContentId successorId; // meaningful when Applied
+};
+
+// --- read side (Bundle lands in Phase 2; K5 stays transport-only) ------------
 
 enum class CognitionSourceKind
 {
@@ -110,46 +259,23 @@ enum class CognitionSourceKind
 struct CognitionSource
 {
     CognitionSourceKind kind { CognitionSourceKind::CanonicalRemote };
-    ContentId contentId; // addressed by content — NOT necessarily a commit;
-                         // empty = store head (genesis when store is empty)
-    Bytes inlineBytes;   // HandoffArtifact: the artifact payload itself
+    ContentId contentId;      // addressed by content — NOT necessarily a commit;
+                              // empty = store head (genesis when store is empty)
+    Bytes inlineBytes;        // HandoffArtifact: the artifact payload itself
+    ContentId expectedDigest; // artifact integrity: when non-empty, the payload
+                              // must hash to this id BEFORE deserialization
+                              // (corruption fails closed — pit P-23)
 };
 
 struct Query
 {
     std::string taskScope;      // mandatory inputs always included (BOOTSTRAP set)
-    std::size_t tokenBudget {}; // K5 domain: effective input tokens, lossless
+    std::size_t tokenBudget {}; // Bundle domain (phase 2); K5 is transport-only
 };
 
 using Data = Bytes; // full materialized snapshot for thinking (ADR-0033)
 
-struct TransactionDelta // write shape: only what changed
-{
-    enum class Kind
-    {
-        None,           // ordinary conversational turn: no context commit
-        AppendDecision, // requires H2 (acceptance = merge-class semantics)
-        AddMemoryRecord,
-        UpsertObligation,
-        CloseObligation,
-        UpdateState,
-    };
-    Kind kind { Kind::None };
-    ContentId base;           // durable fencing token: contentId my thinking assumed
-    std::int64_t recordId {}; // decision id / obligation id, per kind
-    std::string title;
-    std::string payload;
-    std::optional<Handoff> handoff; // typed handoff evidence, when the class requires one
-    std::string handoffEvidenceRef; // PR record / gate evidence / audit id
-};
-
-enum class WorkMode
-{
-    SupervisedForeground, // owner-launched, owner-visible session
-    Unattended,           // scheduled/idle: read-only default (ADR-0036)
-};
-
-// --- the service (v0 statics preserved: a service, not an object) ------------
+// --- the service (single-writer gate + registry) ------------------------------
 
 class QivenContext
 {
@@ -157,42 +283,75 @@ public:
     // bind the process-wide persistence plane (the swappable storage impl)
     static void attachStore(std::shared_ptr<ICognitionStore> store);
 
+    // bind the identity port; defaults to the root-principal verifier below
+    static void attachIdentityVerifier(std::shared_ptr<IIdentityVerifier> verifier);
+
     // materialize a fresh cognition. read-only w.r.t. project truth (R6).
-    // CanonicalRemote -> cold boot | HandoffArtifact -> K4 quarantine semantics
-    static std::shared_ptr<LLMCognition> CreateCognition(const CognitionSource& src);
+    // CanonicalRemote -> cold boot (Promoted: the remote IS canonical);
+    // HandoffArtifact -> quarantined Isolated (K4: restore is not authority).
+    // Returns nullptr on a corrupt source with *err filled (DR-009).
+    static CognitionHandle CreateCognition(const CognitionSource& source,
+                                           DeserializeError* err = nullptr);
 
-    // full snapshot for thinking; token budget = K5's optimization target
-    static Data ReadFromCognition(const LLMCognition* p, const Query& q);
+    // full snapshot for thinking; the typed Bundle with floors lands in Phase 2
+    static Data ReadFromCognition(const CognitionHandle& handle, const Query& query);
 
-    // the gated write. admission order is normative (ADR-0036 + fencing):
-    //   0. unknown / stale runtime epoch / quarantined -> false
-    //   1. base contentId mismatch -> false // durable divergence: re-read
-    //   2. handoff unsatisfied   -> false   // H1-H4 by op class; verbal waiver N/A
-    //   3. unattended + mutating -> false   // unattended = read-only default
-    //   4. validation fails      -> false   // record invariants
-    //   5. apply atomically; contentId advances; history by status, never erase
-    static bool WriteToCognition(LLMCognition* p, const TransactionDelta& d, WorkMode mode);
+    // single-writer lease: exactly one active grant chain-wide. A second
+    // acquire while one is held is refused fail-closed (pit P-01) — competing
+    // flows are quarantined, never queued. Identity is verified at acquire
+    // AND re-checked at write (ADR-0033 section 4).
+    [[nodiscard]] static std::optional<ExecutionGrant> AcquireGrant(const AuthenticatedActor& actor,
+                                                                    WorkMode mode);
+    static void ReleaseGrant(const ExecutionGrant& grant);
 
-    // drop the service's owning reference; pinned Work() cycles finish safely
-    // (lifetime = shared_ptr; authority = epoch — v1's conflation, split in v2)
-    static bool RetireCognition(const std::shared_ptr<LLMCognition>& p);
+    // the gated write. Gate order is normative and tested:
+    //   0. handle known + non-quarantined          -> GovernanceDenied
+    //   1. grant is the active lease               -> GrantRefused
+    //   2. actor re-verified                       -> UnverifiedActor
+    //   3. unattended + mutating                   -> UnattendedMutation
+    //   4. base CAS                                -> StaleBase
+    //   5. policy table + content-bound H2         -> HandoffMissing / HandoffInvalid
+    //                                                 / GovernanceDenied
+    //   6. invariants (whole transaction)          -> InvariantFailed
+    //   7. apply atomically; store CAS             -> StoreDiverged
+    // An empty operations list is an ordinary turn: Applied, nothing stored.
+    static Verdict WriteToCognition(const CognitionHandle& handle,
+                                    const ContextTransaction& transaction,
+                                    const ExecutionGrant& grant);
+
+    // the recovery rule for a refusal, read from cognition (DR-002); missing
+    // rows fall back to FailClosed
+    [[nodiscard]] static RecoveryAction RecoveryFor(const Snapshot& snapshot, RefusalReason reason);
+
+    // drop the service's owning reference; pinned handles stay alive but fenced
+    // (lifetime = shared_ptr; authority = the active grant — the v1 conflation,
+    // split in v2, made a type shape in v3)
+    static bool RetireCognition(const CognitionHandle& handle);
+
+    // the canonical head snapshot, for ports that verify against live
+    // governance; empty principal on an unreadable store
+    [[nodiscard]] static std::shared_ptr<const Snapshot> CanonicalHead();
 
     // the ONLY whole-graph predicate; evaluated by the loop, never by a participant
     static bool IsContinueable(const Human* h, const LLMClientTool* c, const Device* d,
-                               const LLM* l, const LLMCognition* p);
+                               const LLM* l, const CognitionHandle& handle);
 
     [[nodiscard]] static Epoch currentEpoch(); // lock-free sampling for pre-checks
 
 private:
-    struct Registry // per-epoch runtime metadata, kept OUT of the
-    {               // value tree (R1): quarantine flags, liveness
-        std::shared_ptr<LLMCognition> cognition;
-        bool quarantined { false }; // K4: restored artifacts stay non-authoritative
+    struct Registry
+    {
+        std::shared_ptr<Materialization> live; // service-owned mutable view
     };
-
-    static std::mutex g_admission;     // the single-writer gate (ADR-0026, in-process)
+    // canonical head snapshot; caller MUST hold g_admission (ports receive it
+    // as context — P-42: ports never re-enter the service while it is locked)
+    [[nodiscard]] static std::shared_ptr<const Snapshot> CanonicalHeadLocked();
+    static std::mutex g_admission;     // serializes grant state + writes
     static std::atomic<Epoch> g_epoch; // monotonic; fetch_add on each CreateCognition
     static std::shared_ptr<ICognitionStore> g_store;
-    static std::vector<Registry> g_live; // epoch-indexed live cognitions
+    static std::shared_ptr<IIdentityVerifier> g_identity;
+    static std::vector<Registry> g_live; // live materializations, epoch-indexed
+    static std::optional<ExecutionGrant> g_activeGrant;
+    static AuthenticatedActor g_grantActor;
 };
 } // namespace qiven::context
