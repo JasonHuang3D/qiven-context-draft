@@ -24,7 +24,7 @@ ContextTransaction addLesson(const std::string& statement)
 {
     ContextTransaction transaction;
     transaction.operations.push_back(
-        Operation { Operation::Kind::AddMemory, 0, "draft-lesson", statement });
+        Operation { .kind = Operation::Kind::AddMemory, .title = "draft-lesson", .payload = statement, .provenanceRef = "demo-session" });
     return transaction;
 }
 } // namespace
@@ -78,8 +78,7 @@ int main()
     // recovery = halt and escalate, retry forbidden
     llm->deltaGenerator = [](const std::string&, const Snapshot&) {
         ContextTransaction transaction;
-        transaction.operations.push_back(Operation { Operation::Kind::AppendDecision, 37,
-                                                     "ADR-draft", "accept the specification" });
+        transaction.operations.push_back(Operation { .kind = Operation::Kind::AppendDecision, .recordId = 37, .title = "ADR-draft", .payload = "accept the specification" });
         return transaction;
     };
     human->UseLLMToWork(client, "accept without review", result);
@@ -88,8 +87,7 @@ int main()
     // cycle 4: with content-bound H2 evidence — accepted; the durable token advances
     llm->deltaGenerator = [](const std::string&, const Snapshot&) {
         ContextTransaction transaction;
-        transaction.operations.push_back(Operation { Operation::Kind::AppendDecision, 37,
-                                                     "ADR-draft", "accept the specification" });
+        transaction.operations.push_back(Operation { .kind = Operation::Kind::AppendDecision, .recordId = 37, .title = "ADR-draft", .payload = "accept the specification" });
         transaction.handoffEvidenceRef = "PR-record review";
         H2Evidence evidence;
         evidence.reviewer            = "github:JasonHuang3D";

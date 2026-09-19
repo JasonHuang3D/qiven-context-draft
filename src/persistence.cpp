@@ -18,7 +18,7 @@ namespace qiven::context
 {
 namespace
 {
-constexpr std::uint8_t kSerializationVersion = 2;
+constexpr std::uint8_t kSerializationVersion = 3;
 constexpr std::uint32_t kMaxRecords          = 100000; // resource-abuse guard (DR-009)
 
 // --- little-endian TLV writers (fixed field order, versioned) ----------------
@@ -280,6 +280,16 @@ Bytes serializeImpl(const Snapshot& snapshot)
         putStr(bytes, evidence.content);
     }
 
+    putU32(bytes, static_cast<std::uint32_t>(snapshot.conflicts.size()));
+    for (const auto& conflict : snapshot.conflicts)
+    {
+        putStr(bytes, conflict.id);
+        putU8(bytes, static_cast<std::uint8_t>(conflict.status));
+        putStr(bytes, conflict.scope);
+        putStr(bytes, conflict.description);
+        putStr(bytes, conflict.resolution);
+    }
+
     return bytes;
 }
 
@@ -305,7 +315,7 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
         for (std::uint32_t i = 0; reader.ok() && i < handoffCount; ++i)
         {
             HandoffPolicy row;
-            row.opClass           = reader.enumValue<OperationClass>("handoff op class", 3);
+            row.opClass           = reader.enumValue<OperationClass>("handoff op class", 5);
             row.requiresH2        = reader.u8("handoff requiresH2") != 0;
             row.rootPrincipalOnly = reader.u8("handoff rootPrincipalOnly") != 0;
             snapshot.policy.handoff.push_back(row);
@@ -315,7 +325,7 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
         for (std::uint32_t i = 0; reader.ok() && i < recoveryCount; ++i)
         {
             RecoveryRule row;
-            row.reason = reader.enumValue<RefusalReason>("recovery reason", 9);
+            row.reason = reader.enumValue<RefusalReason>("recovery reason", 11);
             row.action = reader.enumValue<RecoveryAction>("recovery action", 5);
             snapshot.policy.recovery.push_back(row);
         }
@@ -423,6 +433,26 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
         }
     }
 
+    if (reader.ok())
+    {
+        const auto conflictCount = reader.cappedCount("conflict count");
+        snapshot.conflicts.reserve(conflictCount);
+        for (std::uint32_t i = 0; reader.ok() && i < conflictCount; ++i)
+        {
+            Conflict conflict;
+            conflict.id     = reader.str("conflict id");
+            conflict.status = reader.enumValue<Conflict::Status>("conflict status", 1);
+            if (!reader.ok())
+            {
+                break;
+            }
+            conflict.scope       = reader.str("conflict scope");
+            conflict.description = reader.str("conflict description");
+            conflict.resolution  = reader.str("conflict resolution");
+            snapshot.conflicts.push_back(std::move(conflict));
+        }
+    }
+
     if (reader.ok() && reader.offset != bytes.size())
     {
         reader.error = DeserializeError { DeserializeError::Kind::Truncated, reader.offset,
@@ -475,6 +505,8 @@ PolicyTable makeDefaultPolicy()
         { OperationClass::MemoryWrite, false, false },
         { OperationClass::ObligationWrite, false, false },
         { OperationClass::StateUpdate, false, false },
+        { OperationClass::ConflictWrite, false, false },
+        { OperationClass::EvidenceWrite, false, false },
     };
     policy.recovery = {
         { RefusalReason::StaleBase, RecoveryAction::RereadRethink },
@@ -487,6 +519,8 @@ PolicyTable makeDefaultPolicy()
         { RefusalReason::GovernanceDenied, RecoveryAction::FailClosed },
         { RefusalReason::StoreDiverged, RecoveryAction::FailClosed },
         { RefusalReason::OutcomeUnresolved, RecoveryAction::Block },
+        { RefusalReason::KeyConflict, RecoveryAction::FailClosed },
+        { RefusalReason::ConflictUnresolved, RecoveryAction::FailClosed },
     };
     return policy;
 }
@@ -498,6 +532,59 @@ Snapshot makeGenesis()
     genesis.constitution             = makeConstitution();
     genesis.policy                   = makeDefaultPolicy();
     return genesis;
+}
+
+const Decision* findDecision(const Snapshot& snapshot, std::int64_t id)
+{
+    for (const auto& decision : snapshot.decisions)
+    {
+        if (decision.id == id)
+        {
+            return &decision;
+        }
+    }
+    return nullptr;
+}
+
+bool reachesDecision(const Snapshot& snapshot, const Decision& from, std::int64_t target)
+{ // acyclic supersession: the chain from `from` must not reach `target` (P-36)
+    if (from.id == target)
+    {
+        return true;
+    }
+    for (const auto id : from.supersedes)
+    {
+        const Decision* prior = findDecision(snapshot, id);
+        if (prior != nullptr && reachesDecision(snapshot, *prior, target))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+const Obligation* findObligation(const Snapshot& snapshot, std::int64_t id)
+{
+    for (const auto& obligation : snapshot.obligations)
+    {
+        if (obligation.id == id)
+        {
+            return &obligation;
+        }
+    }
+    return nullptr;
+}
+
+const Conflict* findConflict(const Snapshot& snapshot, const std::string& id)
+{
+    for (const auto& conflict : snapshot.conflicts)
+    {
+        if (conflict.id == id)
+        {
+            return &conflict;
+        }
+    }
+    return nullptr;
 }
 } // namespace
 
@@ -521,8 +608,12 @@ ContentId DigestOperations(const std::vector<Operation>& operations)
     {
         putU8(bytes, static_cast<std::uint8_t>(operation.kind));
         putI64(bytes, operation.recordId);
+        putI64(bytes, operation.successorRecordId);
+        putU8(bytes, operation.aux);
+        putStr(bytes, operation.scope);
         putStr(bytes, operation.title);
         putStr(bytes, operation.payload);
+        putStr(bytes, operation.provenanceRef);
     }
     return DraftContentId(bytes);
 }
@@ -531,6 +622,25 @@ Bytes SerializeSnapshot(const Snapshot& snapshot)
 {
     return serializeImpl(snapshot);
 }
+
+namespace
+{
+[[nodiscard]] std::string RequestDigestOf(const ContextTransaction& transaction)
+{ // digest of the complete request: base, ordered operations, evidence (ADR-0033 §4)
+    Bytes bytes;
+    putStr(bytes, transaction.base);
+    putStr(bytes, DigestOperations(transaction.operations));
+    putStr(bytes, transaction.handoffEvidenceRef);
+    putU8(bytes, transaction.h2.has_value() ? 1 : 0);
+    if (transaction.h2.has_value())
+    {
+        putStr(bytes, transaction.h2->reviewedDeltaDigest);
+        putStr(bytes, transaction.h2->reviewer);
+        putStr(bytes, transaction.h2->reviewRef);
+    }
+    return DraftContentId(bytes);
+}
+} // namespace
 
 // --- MemoryStore: the contract, proven ---------------------------------------
 
@@ -647,6 +757,7 @@ std::shared_ptr<IIdentityVerifier> QivenContext::g_identity;
 std::vector<QivenContext::Registry> QivenContext::g_live;
 std::optional<ExecutionGrant> QivenContext::g_activeGrant;
 AuthenticatedActor QivenContext::g_grantActor;
+std::map<std::string, QivenContext::Receipt> QivenContext::g_receipts;
 
 void QivenContext::attachStore(std::shared_ptr<ICognitionStore> store)
 {
@@ -798,6 +909,25 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
     {
         return refuse(RefusalReason::UnverifiedActor); // re-checked at commit (ADR-0033 §4)
     }
+    // gate 3: idempotency key resolution (DR-011). A same-key same-request
+    // replay returns the original durable verdict without re-executing — even
+    // when the base has since gone stale; same key with a different request is
+    // refused. Keys without receipts behave as before.
+    const std::string requestDigest = transaction.idempotencyKey.empty()
+                                          ? std::string {}
+                                          : RequestDigestOf(transaction);
+    if (!transaction.idempotencyKey.empty())
+    {
+        const auto receipt = g_receipts.find(transaction.idempotencyKey);
+        if (receipt != g_receipts.end())
+        {
+            if (receipt->second.requestDigest != requestDigest)
+            {
+                return refuse(RefusalReason::KeyConflict); // same key, different request
+            }
+            return receipt->second.outcome; // durable outcome, no re-execution
+        }
+    }
     if (grant.mode == WorkMode::Unattended && !transaction.operations.empty())
     {
         return refuse(RefusalReason::UnattendedMutation); // ADR-0036: read-only default
@@ -820,11 +950,16 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         OperationClass opClass = OperationClass::StateUpdate;
         switch (operation.kind)
         {
-        case Operation::Kind::AppendDecision: opClass = OperationClass::DecisionAcceptance; break;
+        case Operation::Kind::AppendDecision:
+        case Operation::Kind::SupersedeDecision: opClass = OperationClass::DecisionAcceptance; break;
         case Operation::Kind::AddMemory: opClass = OperationClass::MemoryWrite; break;
         case Operation::Kind::UpsertObligation:
-        case Operation::Kind::CloseObligation: opClass = OperationClass::ObligationWrite; break;
+        case Operation::Kind::CloseObligation:
+        case Operation::Kind::TransitionObligation: opClass = OperationClass::ObligationWrite; break;
         case Operation::Kind::UpdateState: opClass = OperationClass::StateUpdate; break;
+        case Operation::Kind::OpenConflict:
+        case Operation::Kind::ResolveConflict: opClass = OperationClass::ConflictWrite; break;
+        case Operation::Kind::AddEvidence: opClass = OperationClass::EvidenceWrite; break;
         }
         const HandoffPolicy* row = nullptr;
         for (const auto& candidate : entry->live->state->policy.handoff)
@@ -856,7 +991,24 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         }
     }
 
+    // gate 6.5: an OPEN conflict whose scope intersects the operation blocks
+    // it (DR-006) — the K4-trial-1 lesson as a compiled gate. Opening and
+    // resolving conflicts is always allowed.
     const Snapshot& current = *entry->live->state;
+    for (const auto& operation : transaction.operations)
+    {
+        if (operation.kind == Operation::Kind::OpenConflict || operation.kind == Operation::Kind::ResolveConflict)
+        {
+            continue;
+        }
+        for (const auto& conflict : current.conflicts)
+        {
+            if (conflict.status == Conflict::Status::Open && (conflict.scope.empty() || conflict.scope == operation.scope))
+            {
+                return refuse(RefusalReason::ConflictUnresolved);
+            }
+        }
+    }
     for (const auto& operation : transaction.operations)
     {
         switch (operation.kind)
@@ -875,9 +1027,9 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
             }
             break;
         case Operation::Kind::AddMemory:
-            if (operation.payload.empty())
+            if (operation.payload.empty() || operation.provenanceRef.empty())
             {
-                return refuse(RefusalReason::InvariantFailed);
+                return refuse(RefusalReason::InvariantFailed); // pit P-37: no unprovenanced lessons
             }
             break;
         case Operation::Kind::UpsertObligation:
@@ -909,6 +1061,69 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
                 return refuse(RefusalReason::InvariantFailed);
             }
             break;
+        case Operation::Kind::SupersedeDecision:
+        {
+            const Decision* superseded = findDecision(current, operation.recordId);
+            const Decision* successor  = findDecision(current, operation.successorRecordId);
+            if (superseded == nullptr || successor == nullptr || superseded == successor || superseded->status != Lifecycle::Accepted || successor->status != Lifecycle::Accepted)
+            {
+                return refuse(RefusalReason::InvariantFailed);
+            }
+            if (reachesDecision(current, *successor, operation.recordId))
+            {
+                return refuse(RefusalReason::InvariantFailed); // acyclic supersession (P-36)
+            }
+            if (operation.payload.empty())
+            {
+                return refuse(RefusalReason::InvariantFailed); // transition rationale required
+            }
+            break;
+        }
+        case Operation::Kind::TransitionObligation:
+        {
+            const Obligation* obligation = findObligation(current, operation.recordId);
+            if (obligation == nullptr || obligation->status != Obligation::Status::Open || operation.payload.empty() || operation.aux > 5)
+            {
+                return refuse(RefusalReason::InvariantFailed);
+            }
+            if (operation.aux == 0 || operation.aux == 2)
+            {
+                return refuse(RefusalReason::InvariantFailed); // Open/Blocked are not transitions
+            }
+            if (operation.aux == 5 && findObligation(current, operation.successorRecordId) == nullptr)
+            {
+                return refuse(RefusalReason::InvariantFailed); // superseded needs a successor
+            }
+            break;
+        }
+        case Operation::Kind::AddEvidence:
+            if (operation.title.empty() || operation.payload.empty())
+            {
+                return refuse(RefusalReason::InvariantFailed);
+            }
+            break;
+        case Operation::Kind::OpenConflict:
+            if (operation.title.empty() || operation.payload.empty())
+            {
+                return refuse(RefusalReason::InvariantFailed); // id + description required
+            }
+            for (const auto& conflict : current.conflicts)
+            {
+                if (conflict.id == operation.title)
+                {
+                    return refuse(RefusalReason::InvariantFailed); // ids are never reused
+                }
+            }
+            break;
+        case Operation::Kind::ResolveConflict:
+        {
+            const Conflict* conflict = findConflict(current, operation.title);
+            if (conflict == nullptr || conflict->status != Conflict::Status::Open || operation.payload.empty())
+            {
+                return refuse(RefusalReason::InvariantFailed); // resolution text required
+            }
+            break;
+        }
         }
     }
 
@@ -933,7 +1148,7 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
                                                  MemoryRecord::Status::Active,
                                                  operation.title,
                                                  operation.payload,
-                                                 Provenance {} });
+                                                 Provenance { { operation.provenanceRef } } });
             break;
         case Operation::Kind::UpsertObligation:
             next.obligations.push_back(Obligation { Obligation::Status::Open,
@@ -955,6 +1170,50 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
         case Operation::Kind::UpdateState:
             next.state.current = operation.payload;
             break;
+        case Operation::Kind::SupersedeDecision:
+            for (auto& decision : next.decisions)
+            {
+                if (decision.id == operation.recordId)
+                {
+                    decision.status = Lifecycle::Superseded; // history kept, status moves
+                    decision.supersededBy.push_back(operation.successorRecordId);
+                }
+                if (decision.id == operation.successorRecordId)
+                {
+                    decision.supersedes.push_back(operation.recordId); // reciprocal, acyclic
+                }
+            }
+            break;
+        case Operation::Kind::TransitionObligation:
+            for (auto& obligation : next.obligations)
+            {
+                if (obligation.id == operation.recordId)
+                {
+                    obligation.status             = static_cast<Obligation::Status>(operation.aux);
+                    obligation.completionCriteria = operation.payload;
+                }
+            }
+            break;
+        case Operation::Kind::AddEvidence:
+            next.evidence.push_back(EvidenceRecord { operation.title, operation.payload });
+            break;
+        case Operation::Kind::OpenConflict:
+            next.conflicts.push_back(Conflict { operation.title,
+                                                Conflict::Status::Open,
+                                                operation.scope,
+                                                operation.payload,
+                                                {} });
+            break;
+        case Operation::Kind::ResolveConflict:
+            for (auto& conflict : next.conflicts)
+            {
+                if (conflict.id == operation.title)
+                {
+                    conflict.status     = Conflict::Status::Resolved;
+                    conflict.resolution = operation.payload;
+                }
+            }
+            break;
         }
     }
 
@@ -962,11 +1221,27 @@ Verdict QivenContext::WriteToCognition(const CognitionHandle& handle,
     const ContentId id   = g_store->append(newState, entry->live->contentId);
     if (id.empty())
     {
-        return refuse(RefusalReason::StoreDiverged); // store-level CAS failed: fail closed
+        // store-level CAS failed. With an idempotency key this is a LOST
+        // ACKNOWLEDGEMENT, not a known rollback: the commit may have landed
+        // before the failure. Record the receipt as OutcomeUnknown — dependent
+        // mutations stop; a same-key retry resolves to this receipt (DR-011).
+        const Verdict unknown { Verdict::Outcome::OutcomeUnknown,
+                                RefusalReason::OutcomeUnresolved,
+                                {} };
+        if (!transaction.idempotencyKey.empty())
+        {
+            g_receipts[transaction.idempotencyKey] = Receipt { requestDigest, unknown };
+        }
+        return unknown;
     }
     entry->live->state     = std::make_shared<const Snapshot>(std::move(next));
     entry->live->contentId = id; // the durable fencing token advances
-    return Verdict { Verdict::Outcome::Applied, RefusalReason::StoreDiverged, id };
+    const Verdict applied { Verdict::Outcome::Applied, RefusalReason::StoreDiverged, id };
+    if (!transaction.idempotencyKey.empty())
+    {
+        g_receipts[transaction.idempotencyKey] = Receipt { requestDigest, applied };
+    }
+    return applied;
 }
 
 RecoveryAction QivenContext::RecoveryFor(const Snapshot& snapshot, RefusalReason reason)

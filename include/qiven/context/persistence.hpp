@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -204,16 +205,25 @@ struct Operation
 {
     enum class Kind
     {
-        AppendDecision,   // policy class: DecisionAcceptance (merge-class)
-        AddMemory,        // MemoryWrite
-        UpsertObligation, // ObligationWrite
-        CloseObligation,  // ObligationWrite
-        UpdateState,      // StateUpdate
+        AppendDecision,       // DecisionAcceptance (merge-class)
+        SupersedeDecision,    // DecisionAcceptance: lifecycle transition
+        AddMemory,            // MemoryWrite
+        UpsertObligation,     // ObligationWrite
+        CloseObligation,      // ObligationWrite
+        TransitionObligation, // ObligationWrite: Done/Cancelled/Superseded
+        UpdateState,          // StateUpdate
+        AddEvidence,          // EvidenceWrite
+        OpenConflict,         // ConflictWrite
+        ResolveConflict,      // ConflictWrite
     };
     Kind kind { Kind::AddMemory };
-    std::int64_t recordId { 0 }; // decision id / obligation id, per kind
+    std::int64_t recordId { 0 };          // decision/obligation/conflict id, per kind
+    std::int64_t successorRecordId { 0 }; // supersede/transition successor
+    std::uint8_t aux { 0 };               // TransitionObligation: Obligation::Status
+    std::string scope;                    // conflict scope (empty = global)
     std::string title;
     std::string payload;
+    std::string provenanceRef; // required for AddMemory (constitution 9)
 };
 
 struct H2Evidence // content-bound review evidence (DR-004, pit P-05)
@@ -229,6 +239,10 @@ struct ContextTransaction
     std::vector<Operation> operations; // atomic; validated as a whole, applied as a whole
     std::string handoffEvidenceRef;    // transport pointer (PR record / audit id)
     std::optional<H2Evidence> h2;      // present iff the policy table requires it
+    std::string idempotencyKey;        // when non-empty: same key + same request resolves
+                                       // to the original durable outcome and never
+                                       // re-executes; same key + different request is
+                                       // refused (DR-011, ADR-0033 section 4)
 };
 
 // content identity of the ordered operations — what an H2 review binds to
@@ -308,13 +322,18 @@ public:
     //   0. handle known + non-quarantined          -> GovernanceDenied
     //   1. grant is the active lease               -> GrantRefused
     //   2. actor re-verified                       -> UnverifiedActor
-    //   3. unattended + mutating                   -> UnattendedMutation
-    //   4. base CAS                                -> StaleBase
-    //   5. policy table + content-bound H2         -> HandoffMissing / HandoffInvalid
+    //   3. idempotency key resolution              -> replay original verdict /
+    //                                                 KeyConflict
+    //   4. unattended + mutating                   -> UnattendedMutation
+    //   5. base CAS                                -> StaleBase
+    //   6. policy table + content-bound H2         -> HandoffMissing / HandoffInvalid
     //                                                 / GovernanceDenied
-    //   6. invariants (whole transaction)          -> InvariantFailed
-    //   7. apply atomically; store CAS             -> StoreDiverged
+    //   7. invariants (whole transaction)          -> InvariantFailed
+    //   8. apply atomically; store CAS             -> StoreDiverged
     // An empty operations list is an ordinary turn: Applied, nothing stored.
+    // A non-empty key records a durable receipt; a lost store acknowledgement
+    // yields Verdict{OutcomeUnknown, OutcomeUnresolved} — never a rollback
+    // claim — and the same key resolves to the receipt until it is replaced.
     static Verdict WriteToCognition(const CognitionHandle& handle,
                                     const ContextTransaction& transaction,
                                     const ExecutionGrant& grant);
@@ -353,5 +372,11 @@ private:
     static std::vector<Registry> g_live; // live materializations, epoch-indexed
     static std::optional<ExecutionGrant> g_activeGrant;
     static AuthenticatedActor g_grantActor;
+    struct Receipt
+    {
+        std::string requestDigest; // digest of the complete request (base, ops, evidence)
+        Verdict outcome;           // the durable outcome the key resolves to
+    };
+    static std::map<std::string, Receipt> g_receipts; // key -> receipt (draft: in-process)
 };
 } // namespace qiven::context
