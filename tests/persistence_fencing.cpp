@@ -810,13 +810,15 @@ int main()
     humanB->name              = "Jason";
     humanB->verifiedPrincipal = "github:JasonHuang3D";
     auto llmB2                = std::make_shared<LLM>();
-    llmB2->name               = "GLM-5.3-Flash"; // a DIFFERENT model could bind here
+    llmB2->name               = "FutureModel-B"; // participant CLASS substitution
     llmB2->pCognition         = headB;
     auto deviceB2             = std::make_shared<Device>();
+    deviceB2->name            = "OtherDevice";
+    deviceB2->os              = "Linux";
     auto clientB2             = std::make_shared<LLMClientTool>();
     clientB2->pCurrentLLM     = llmB2;
     clientB2->pTargetDevice   = deviceB2;
-    clientB2->binding         = ParticipantBinding { Role::Worker, "GLM-5.3-Flash" };
+    clientB2->binding         = ParticipantBinding { Role::Worker, "FutureModel-B" };
 
     // continuity: everything Generation A wrote is present, unchanged
     bool foundRebirth = false;

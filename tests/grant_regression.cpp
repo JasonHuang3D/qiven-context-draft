@@ -32,7 +32,7 @@ int main()
 
     // boot genesis so the canonical head exists for identity verification
     CognitionSource boot;
-    boot.kind = CognitionSourceKind::CanonicalRemote;
+    boot.kind      = CognitionSourceKind::CanonicalRemote;
     const auto cog = QivenContext::create_cognition(boot);
     QCD_CHECK(cog != nullptr);
 
