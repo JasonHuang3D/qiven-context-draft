@@ -107,6 +107,7 @@ repository; per-row test names are not used for them (P-50 precedent).
 | --- | --- | --- | --- | --- | --- | --- |
 | P-51 | Attribution block published AHEAD of the conventional subject — twice (fourteen commits 2026-09-19; eighteen across five repositories 2026-09-20), each requiring an owner-directed history rewrite with trees preserved | MEM-20260919T113238Z-B2F4D8; MEM-20260919T135930Z-F1C2A9; MEM-20260920T100100Z-A7D3E9 | PROC | ActionKind Commit: any LLM-authored commit or merge-message authoring | devkit tools/check_commit_subjects.py (selftested; HEAD-ancestry scan; wired into the devkit local gate). Reaches other repositories via the next operator roll — deliberately not a cross-repo callback (managed repos stay independently usable) | v4 |
 | P-52 | A rename left dangling path references behind — twice the same day: a hardcoded pre-restructure test path masked by a scoped gate, and six stale refs behind an "all fixed" commit claim | activation-failure-inventory A3/A4; reconciliation PR #39; fix 46db19a | PROC | ActionKind ModifyReferencedContract / MakeCanonicalClaim: rename or move of a referenced path; completeness claims in commits | context tools/check_references.py (extension-bearing path references on normative surfaces must resolve; evidence surfaces and test fixtures scoped out with reasons; cross-repo citations exempt-listed; vacuity-proven by injecting the exact A4 path; wired into context-local and context-docs gates) | v4 |
+| P-53 | Merge-class publication proceeded on a scoped gate: three morning merges published a broken test that the full gate would have caught; the full-gate-at-exact-head rule existed but was not recalled at merge time | activation-failure-inventory A5; PR #39 fix 46db19a; supervised-agent scoped-iteration rule | PROC | ActionKind Publish: any merge-class publication | devkit operator gate receipts + gate_proof builtin (devkit 146bc63, self-hosted; context snapshot 4f5cdef with merge-proof task); supervised-agent publish-boundary rule: missing receipt for the exact head is a stop condition. Fail-closed vacuity-proven (new head without receipt refuses) | v4 |
 
 Back-filled activation edges for existing pits (their encodings are
 unchanged; the trigger column is the v4 addition):
@@ -118,6 +119,6 @@ unchanged; the trigger column is the v4 addition):
 | P-44 | ActionKind ModifyReferencedContract: version bump of a pinned contract (the A9 positive control — dependents caught by compiled tests in minutes, not rewrites) | pit.golden_vector_pinned; serialization roundtrip tests |
 | P-50 | ActionKind Publish: merge-class publication (delta identity + gate class at the same boundary; the gate-class half is backlog item 3) | morning-review checklist + audit record |
 
-Backlog (inventory §5, not yet compiled): merge-class full-gate proof (A5);
-tool-contract invocation routing (A6); failure-fingerprint batched evidence
-(A7); lower-layer search (A8).
+Backlog (inventory §5): tool-contract invocation routing (A6); failure-
+fingerprint batched evidence (A7); lower-layer search (A8). Merge-class
+full-gate proof (A5/P-53) compiled 2026-09-20.

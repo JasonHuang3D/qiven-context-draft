@@ -41,6 +41,7 @@ named after the incident that motivated it.
 | [participant-model.md](participant-model.md) | Who are the participants, and what may each produce, consume, or authorize? Roles vs designations vs bindings; workflow dependency layering; the participant dependency matrix. |
 | [cognitive-boundary-model.md](cognitive-boundary-model.md) | The v4 seed: Judgment / Cognitive Control / Mechanism separated by specification closure; ActionIntent-driven cognition activation, invocation policy, PreparationPacket, and the V4-R invariants. |
 | [activation-failure-inventory.md](activation-failure-inventory.md) | v4 landing steps 2-3: the real persistence-success/activation-failure scars, the minimal ActionKind vocabulary they ground, and the ranked trigger/guard backlog. |
+| [v4-roadmap.md](v4-roadmap.md) | In what order does v4 land, and what proves each phase? v4.0-v4.2 complete; control-plane types next. |
 | [decisions.md](decisions.md) | Which design decisions were made and — equally — which alternatives were rejected, and why (negative knowledge, first-class). |
 | [pit-regression-map.md](pit-regression-map.md) | Where is every recorded pit encoded? The scar ledger: pit → evidence → type/gate/test → status. |
 | [invariant-inventory.md](invariant-inventory.md) | Which invariants are compiled, which are compilable, and which are judgment-only forever — stated honestly. |
@@ -52,9 +53,12 @@ named after the incident that motivated it.
 2. `cognition-model.md` — the supply side.
 3. `process-model.md` — how the two meet in a running loop.
 4. `participant-model.md` — who is in the loop, and what each may do.
-5. `decisions.md` — why it is this way and not the other ways.
-6. `pit-regression-map.md` and `invariant-inventory.md` — the audit surfaces.
-7. `v3-roadmap.md` — the plan.
+5. `cognitive-boundary-model.md` — the v4 seed: when cognition must become active.
+6. `decisions.md` — why it is this way and not the other ways.
+7. `pit-regression-map.md`, `invariant-inventory.md` and
+   `activation-failure-inventory.md` — the audit surfaces.
+8. `v3-roadmap.md` — the v3 plan.
+9. `v4-roadmap.md` — the activation plan (v4.0-v4.2 already landed).
 
 ## Relationship to other surfaces
 
