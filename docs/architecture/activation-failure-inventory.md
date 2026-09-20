@@ -196,9 +196,12 @@ demands them.
 ## 5. Trigger/guard backlog (ranked by recurrence × cost)
 
 1. **Attribution subject lint** (A1) — happened twice; each recurrence cost
-   a multi-repo history rewrite. Trivially mechanical.
-2. **Reference-integrity sweep** (A3+A4) — two cases the same day; grep-
-   level over canonical surfaces + tooling + tests.
+   a multi-repo history rewrite. **COMPILED 2026-09-20**:
+   devkit `tools/check_commit_subjects.py`, selftested, wired into the
+   devkit local gate; other repositories adopt via the next operator roll.
+2. **Reference-integrity sweep** (A3+A4) — two cases the same day. **COMPILED
+   2026-09-20**: context `tools/check_references.py`, vacuity-proven,
+   wired into the context-local and context-docs gates.
 3. **Merge-class full-gate proof** (A5, P-50 boundary) — Operator refuses
    merge-class publication without recorded exact-head full-gate PASS.
 4. **Tool-contract invocation** (A6) — route through Operator tasks; flag
@@ -210,9 +213,11 @@ demands them.
 
 ## 6. Pit-ledger second dimension (proposal, not yet landed)
 
-The pit map's schema would gain `activation_trigger` and `compiled_guard`
-columns; candidate new rows A1 (`Commit` lint), A3/A4 (ref sweep), A5
-(gate proof) as P-51..P-53 **when their guards land** — not before:
+**Landed 2026-09-20**: the pit map gains a v4 activation ledger section
+(`pit-regression-map.md`) carrying `activation_trigger` and `compiled_guard`
+per row; P-51 (attribution lint) and P-52 (ref sweep) were born WITH their
+guards; P-53 (merge-class gate proof) follows when backlog item 3 lands.
+Original sequencing rule kept:
 `tools/check_pit_map.py` validates map↔encoding consistency, so adding
 uncompiled pits would fail the traceability gate. The map edit lands in
 the same transaction as the first guards.

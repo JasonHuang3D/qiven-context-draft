@@ -8,7 +8,9 @@ motivated it.
 
 Status legend: **v2** = encoded in draft v2 today · **v3** = specified in this
 corpus, lands with the v3 phases · **judgment** = deliberately not compiled;
-pinned by decision records / prompts (`invariant-inventory.md` §4).
+pinned by decision records / prompts (`invariant-inventory.md` §4) · **v4** =
+activation-layer encoding per the cognitive boundary model; the operational
+guard lives in the devkit/context repositories (see the v4 activation ledger).
 
 Failure classes: `AUTH` authority/identity · `EVID` evidence/acceptance ·
 `RETR` retrieval/economy · `TRAN` transport/durability · `ENV` environment ·
@@ -90,3 +92,32 @@ whether a hazard class is "known" (§17); whether evidence is "genuinely
 insufficient" (§11); review quality itself; relevance/ranking quality; the
 judgment that a transaction is "material" (trigger list); spec-readiness for
 worker handoff. See `invariant-inventory.md` §4.
+
+## v4 activation ledger (second dimension)
+
+The second dimension of "scars compile" (cognitive-boundary-model §39):
+a remembered scar that is never activated can still be re-lived. Rows here
+give pits their activation edge — the future condition that recalls the
+lesson — and the compiled guard that makes forgetting fail a gate instead
+of surviving to review. Derived from `activation-failure-inventory.md`
+(A1-A9). v4-status rows name operational encodings outside this
+repository; per-row test names are not used for them (P-50 precedent).
+
+| ID | Pit (what happened) | Canonical evidence | Class | Activation trigger | Compiled guard | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| P-51 | Attribution block published AHEAD of the conventional subject — twice (fourteen commits 2026-09-19; eighteen across five repositories 2026-09-20), each requiring an owner-directed history rewrite with trees preserved | MEM-20260919T113238Z-B2F4D8; MEM-20260919T135930Z-F1C2A9; MEM-20260920T100100Z-A7D3E9 | PROC | ActionKind Commit: any LLM-authored commit or merge-message authoring | devkit tools/check_commit_subjects.py (selftested; HEAD-ancestry scan; wired into the devkit local gate). Reaches other repositories via the next operator roll — deliberately not a cross-repo callback (managed repos stay independently usable) | v4 |
+| P-52 | A rename left dangling path references behind — twice the same day: a hardcoded pre-restructure test path masked by a scoped gate, and six stale refs behind an "all fixed" commit claim | activation-failure-inventory A3/A4; reconciliation PR #39; fix 46db19a | PROC | ActionKind ModifyReferencedContract / MakeCanonicalClaim: rename or move of a referenced path; completeness claims in commits | context tools/check_references.py (extension-bearing path references on normative surfaces must resolve; evidence surfaces and test fixtures scoped out with reasons; cross-repo citations exempt-listed; vacuity-proven by injecting the exact A4 path; wired into context-local and context-docs gates) | v4 |
+
+Back-filled activation edges for existing pits (their encodings are
+unchanged; the trigger column is the v4 addition):
+
+| ID | Activation trigger (v4) | Existing encoding |
+| --- | --- | --- |
+| P-18 | ActionKind BeginTask / task-domain transition: structural boundaries fire retrieval regardless of felt confidence | constitution §16; RetrievalTrigger enum |
+| P-38 | ActionKind MakeLiveClaim: any live-state claim; durable profiles carry families only | environment-profile family rule; verify_live ports |
+| P-44 | ActionKind ModifyReferencedContract: version bump of a pinned contract (the A9 positive control — dependents caught by compiled tests in minutes, not rewrites) | pit.golden_vector_pinned; serialization roundtrip tests |
+| P-50 | ActionKind Publish: merge-class publication (delta identity + gate class at the same boundary; the gate-class half is backlog item 3) | morning-review checklist + audit record |
+
+Backlog (inventory §5, not yet compiled): merge-class full-gate proof (A5);
+tool-contract invocation routing (A6); failure-fingerprint batched evidence
+(A7); lower-layer search (A8).
