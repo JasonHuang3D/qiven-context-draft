@@ -207,6 +207,187 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
     return packet;
 }
 
+// --- v4.4 / A6: tool invocation is mechanism-owned when a contract exists
+// (seed §17): participants express intent; the declared argv contract
+// constructs and validates the concrete invocation. Guessing syntax where
+// a contract exists is the A6 failure class (the CLI-retry odyssey).
+
+struct ToolContract // the declared, machine-readable argv contract
+{
+    std::string tool;                      // "qiven"
+    std::string operation;                 // "gate"
+    std::vector<std::string> argvTemplate; // fixed words and {placeholders}:
+                                           // e.g. {"{python}", "tools/qiven.py",
+                                           //  "{operation}", "{subject}"}
+    std::vector<std::string> allowedFlags; // "--json", "--verbose", ...
+};
+
+[[nodiscard]] inline bool is_placeholder(const std::string& word)
+{
+    return word.size() >= 2 && word.front() == '{' && word.back() == '}';
+}
+
+// Construct the invocation from the contract, never from memory: template
+// fixed words are kept verbatim; {operation}/{tool}/{subject} substitute
+// from the intent; trailing allowed flags pass through in order.
+[[nodiscard]] inline std::vector<std::string> construct_invocation(
+    const ToolContract& contract, const ActionIntent& intent)
+{
+    std::vector<std::string> argv;
+    for (const auto& word : contract.argvTemplate)
+    {
+        if (word == "{operation}")
+        {
+            argv.push_back(intent.operation.empty() ? contract.operation : intent.operation);
+        }
+        else if (word == "{tool}")
+        {
+            argv.push_back(intent.tool.empty() ? contract.tool : intent.tool);
+        }
+        else if (word == "{subject}")
+        {
+            argv.push_back(intent.concepts.empty() ? std::string {} : intent.concepts.front());
+        }
+        else
+        {
+            argv.push_back(word);
+        }
+    }
+    return argv;
+}
+
+// Validate an argv AGAINST the contract: same arity, fixed positions
+// verbatim, placeholder positions non-empty. A guessed variant (the A6
+// failure class) differs in a fixed position or arity and fails here.
+[[nodiscard]] inline bool validate_invocation(const ToolContract& contract,
+                                              const std::vector<std::string>& argv)
+{
+    if (argv.size() != contract.argvTemplate.size())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < argv.size(); ++i)
+    {
+        const std::string& word = contract.argvTemplate[i];
+        if (is_placeholder(word))
+        {
+            if (argv[i].empty())
+            {
+                return false;
+            }
+        }
+        else if (argv[i] != word)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// --- v4.4 / A7: failure is an invocation trigger (seed §18/§19) ----------
+// A material failure creates evidence; the next action must not be an
+// equivalent retry with nothing new (V4-R3: blind retry is not recovery).
+
+// Normalize a failure message for fingerprint stability: drop volatile
+// tokens (long digit runs = timestamps/ids; temp-path fragments). The
+// fingerprint identity must survive incidental text, not encode it.
+[[nodiscard]] inline std::string normalize_failure_text(const std::string& message)
+{
+    std::string out;
+    std::string word;
+    const auto flush = [&]() {
+        if (word.empty())
+        {
+            return;
+        }
+        bool volatileToken = false;
+        std::size_t digits = 0;
+        for (const char c : word)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                ++digits;
+            }
+        }
+        if (digits >= 4)
+        {
+            volatileToken = true; // timestamp / large id
+        }
+        if (word.find("tmp") != std::string::npos ||
+            word.find(".generated-temp") != std::string::npos)
+        {
+            volatileToken = true; // temp path fragment
+        }
+        if (!volatileToken)
+        {
+            if (!out.empty())
+            {
+                out += ' ';
+            }
+            out += word;
+        }
+        word.clear();
+    };
+    for (const char c : message)
+    {
+        if (c == ' ' || c == '\t' || c == '\n')
+        {
+            flush();
+        }
+        else
+        {
+            word += c;
+        }
+    }
+    flush();
+    return out;
+}
+
+// Pit recall from a fingerprint: memory records (risk/lesson class) whose
+// text matches the fingerprint's tool or category — the known-pit lookup
+// that must precede any retry (seed §18).
+[[nodiscard]] inline std::vector<std::string> find_related_records(
+    const Snapshot& snapshot, const FailureFingerprint& fingerprint)
+{
+    std::vector<std::string> out;
+    for (const auto& record : snapshot.memory)
+    {
+        if (record.kind != MemoryRecord::Kind::Risk &&
+            record.kind != MemoryRecord::Kind::Lesson)
+        {
+            continue;
+        }
+        const bool matches = record.title.find(fingerprint.tool) != std::string::npos ||
+                             record.statement.find(fingerprint.tool) != std::string::npos ||
+                             record.title.find(fingerprint.category) != std::string::npos;
+        if (matches)
+        {
+            out.push_back(record.title + ": " + record.statement);
+        }
+    }
+    return out;
+}
+
+// The retry rule (V4-R3): an equivalent retry — same tool+operation, same
+// normalized failure signature — is permitted ONLY with new evidence.
+[[nodiscard]] inline bool retry_permitted(const FailureFingerprint& prior,
+                                          const ActionIntent& candidate,
+                                          bool evidenceAdded)
+{
+    if (evidenceAdded)
+    {
+        return true;
+    }
+    const bool sameOperation = candidate.tool == prior.tool &&
+                               candidate.operation == prior.operation;
+    const bool sameSignature =
+        normalize_failure_text(candidate.priorFailure.has_value()
+                                   ? candidate.priorFailure->stableMessage
+                                   : prior.stableMessage) ==
+        normalize_failure_text(prior.stableMessage);
+    return !(sameOperation && sameSignature); // identical + no evidence: refused
+}
+
 struct EvidenceGap          // typed absence: gaps are RECORDED, never synthesized
 {                           // (constitution #5; the v2-v5 missing sessions lesson)
     std::string what;       // what is missing or unresolved

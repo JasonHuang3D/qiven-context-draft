@@ -68,3 +68,13 @@ set_target_properties(qiven-context-draft-control-plane
         FOLDER "Tests"
 )
 add_test(NAME qiven-context-draft-control-plane COMMAND qiven-context-draft-control-plane)
+
+add_executable(qiven-context-draft-tool-retry tool_and_retry.cpp)
+target_link_libraries(qiven-context-draft-tool-retry PRIVATE qiven::context-draft)
+qiven_context_draft_enable_strong_warnings(qiven-context-draft-tool-retry)
+set_target_properties(qiven-context-draft-tool-retry
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+        FOLDER "Tests"
+)
+add_test(NAME qiven-context-draft-tool-retry COMMAND qiven-context-draft-tool-retry)

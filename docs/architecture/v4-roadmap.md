@@ -55,7 +55,7 @@ identical preparation); fail-closed unresolved recall; listed action-class
 demands; purity. `default_invocation_policy()` encodes P-51/52/53 and the
 structural boundaries as policy data. Serialization v7, golden re-pinned.
 
-## Phase v4.4 — Remaining high-value triggers
+## Phase v4.4 — Remaining high-value triggers ✅
 
 **Deliverable.** A6 tool-contract invocation routing (Operator-declared
 argv drives invocation; guessing forbidden where a contract exists);
@@ -63,9 +63,12 @@ A7 failure-fingerprint + batched evidence (first material failure captures
 fingerprint + retrieves related pits; repeated identical signature refuses
 blind retry).
 
-**Proof.** A6: a contract-bearing invocation constructed mechanically; a
-bypass attempt fails. A7: fingerprint index lookup returns the recorded
-pit; the second identical failure without new evidence is refused.
+**Proof.** LANDED 2026-09-20 (`tests/tool_and_retry.cpp`): A6 — the
+contract constructs the argv; three guessed-variant shapes (wrong layout,
+typo flag, renamed operation) all FAIL validation. A7 — normalization
+strips timestamps/temp paths; the fingerprint recalls the recorded
+odyssey pit; the equivalent retry without new evidence is REFUSED
+(V4-R3), with evidence or a different operation permitted.
 
 ## Phase v4.5 — Creation-boundary activation
 
