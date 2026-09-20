@@ -58,3 +58,13 @@ set_target_properties(qiven-context-draft-participant
         FOLDER "Tests"
 )
 add_test(NAME qiven-context-draft-participant COMMAND qiven-context-draft-participant)
+
+add_executable(qiven-context-draft-control-plane control_plane.cpp)
+target_link_libraries(qiven-context-draft-control-plane PRIVATE qiven::context-draft)
+qiven_context_draft_enable_strong_warnings(qiven-context-draft-control-plane)
+set_target_properties(qiven-context-draft-control-plane
+    PROPERTIES
+        CXX_EXTENSIONS OFF
+        FOLDER "Tests"
+)
+add_test(NAME qiven-context-draft-control-plane COMMAND qiven-context-draft-control-plane)

@@ -122,7 +122,7 @@ int main()
     // integrity digest and the storage revision, and they are different types
     std::printf("genesis digest: %s revision: %s\n", c1->digest.value.c_str(),
                 c1->revision.value.c_str());
-    QCD_CHECK(c1->digest == SnapshotDigest { "snap-d4b9b4aa1e614af4" }); // pit.golden_vector_pinned (v6 genesis format: roles registry + profile layer)
+    QCD_CHECK(c1->digest == SnapshotDigest { "snap-70e3076be2f22d5f" }); // pit.golden_vector_pinned (v7 genesis format: + invocation policy)
     QCD_CHECK(!IsEmpty(c1->revision));
 
     // pit.port_never_reenters_service (P-42): the identity port receives the
@@ -530,7 +530,7 @@ int main()
         addEvidence.base = w->revision;
         addEvidence.operations.push_back(Operation { .kind    = Operation::Kind::AddEvidence,
                                                      .scope   = "",
-                                                     .title   = "snap-d4b9b4aa1e614af4",
+                                                     .title   = "snap-70e3076be2f22d5f",
                                                      .payload = "genesis golden vector pinned" });
         QCD_CHECK(QivenContext::write_to_cognition(w, addEvidence, *g2).outcome == Verdict::Outcome::Applied);
     }
@@ -700,7 +700,7 @@ int main()
 
     // pit.resource_abuse_fails_closed (DR-009): bounded reserves, typed error
     Bytes abusive;
-    abusive.push_back(std::byte { 6 }); // serialization version (keep in sync with serialization_version_limit)
+    abusive.push_back(std::byte { 7 }); // serialization version (keep in sync with serialization_version_limit)
     for (unsigned i = 0; i < 4; ++i)
     {
         abusive.push_back(std::byte { 0 }); // empty root principal string

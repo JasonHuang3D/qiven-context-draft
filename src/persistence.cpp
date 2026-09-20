@@ -24,7 +24,7 @@ namespace qiven::context
 {
 namespace
 {
-constexpr std::uint8_t serialization_version_limit = 6;      // 6: roles registry + profile layer (DR-017/018)
+constexpr std::uint8_t serialization_version_limit = 7;      // 7: invocation policy (v4.3); 6: roles + layer
 constexpr std::uint32_t max_serialized_records     = 100000; // resource-abuse guard (DR-009)
 
 // --- little-endian TLV writers (fixed field order, versioned) ----------------
@@ -317,6 +317,17 @@ Bytes serializeImpl(const Snapshot& snapshot)
     }
 
     // DR-017: the canonical role registry is cognition data; exports carry it
+    // v4.3: the invocation policy travels with the snapshot (activation is
+    // cognition data; a restored generation derives identical preparation)
+    putU32(bytes, static_cast<std::uint32_t>(snapshot.invocation.rules.size()));
+    for (const auto& rule : snapshot.invocation.rules)
+    {
+        putU8(bytes, static_cast<std::uint8_t>(rule.action));
+        putU8(bytes, static_cast<std::uint8_t>(rule.requirement));
+        putStr(bytes, rule.subject);
+        putU8(bytes, rule.blocking ? 1 : 0);
+    }
+
     putU32(bytes, static_cast<std::uint32_t>(snapshot.roles.size()));
     for (const auto& role : snapshot.roles)
     {
@@ -566,6 +577,25 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
             {
                 snapshot.views.push_back(std::move(view));
             }
+        }
+    }
+
+    if (reader.ok())
+    {
+        const auto ruleCount = reader.cappedCount("invocation rules");
+        snapshot.invocation.rules.reserve(ruleCount);
+        for (std::uint32_t i = 0; reader.ok() && i < ruleCount; ++i)
+        {
+            InvocationRule rule;
+            rule.action      = reader.enumValue<ActionKind>("rule action", 13);
+            rule.requirement = reader.enumValue<RequirementKind>("rule requirement", 8);
+            if (!reader.ok())
+            {
+                break;
+            }
+            rule.subject  = reader.str("rule subject");
+            rule.blocking = reader.u8("rule blocking") != 0;
+            snapshot.invocation.rules.push_back(std::move(rule));
         }
     }
 

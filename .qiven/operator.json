@@ -89,6 +89,10 @@
         "python",
         "tools/check_pit_map.py"
       ]
+    },
+    "merge-proof": {
+      "builtin": "gate_proof",
+      "gate": "local"
     }
   },
   "gates": {

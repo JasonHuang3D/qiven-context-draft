@@ -38,7 +38,7 @@ receipt = stop).
 without a receipt refuses merge-proof; a fresh gate PASS at that head
 unblocks it. Devkit self-host (146bc63) + context snapshot (4f5cdef).
 
-## Phase v4.3 — Control-plane types (current phase)
+## Phase v4.3 — Control-plane types ✅
 
 **Deliverable.** The seed's §27 vocabulary as draft C++ types with
 serialization: `ClaimClass`, `ActionKind`, `ActionIntent`,
@@ -48,10 +48,12 @@ data, PolicyTable-adjacent), `PreparationPacket`; the discretionary
 requirements derivation demo covering the naming-convention scenario
 (seed §29).
 
-**Proof.** Type tests + serialization round-trip (v7 bump, golden re-pin)
-+ the §29 scenario executable as a test: `CreateCppSymbol` intent yields a
-packet whose mandatory context includes the naming policy — the first §41
-proof obligation in miniature.
+**Proof.** LANDED 2026-09-20 (`03abf0d`, gate + merge-proof PASS):
+`tests/control_plane.cpp` executes the §29 naming scenario from the
+snapshot only; the §41 transport miniature (restored generation derives
+identical preparation); fail-closed unresolved recall; listed action-class
+demands; purity. `default_invocation_policy()` encodes P-51/52/53 and the
+structural boundaries as policy data. Serialization v7, golden re-pinned.
 
 ## Phase v4.4 — Remaining high-value triggers
 
