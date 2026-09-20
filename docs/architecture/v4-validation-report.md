@@ -29,7 +29,7 @@ artifact-causal activation trial, and the post-closeout stabilization
 | 5 | Repeated blind retry is refused | **compiled** | A7: `retry_permitted` refuses the equivalent retry without new evidence (V4-R3) | repo-semantics |
 | 6 | Canonical claim retrieves canonical truth | **compiled** | `control_plane.cpp` fail-closed case: VerifyCanonical unresolved → packet not ready; default policy carries the rule | repo-semantics |
 | 7 | Live claim verifies live state | **compiled (boundary)** | MakeLiveClaim → VerifyLive is a listed, execution-time demand by default policy; the draft deliberately hosts no live ports (they are runtime mechanisms) | repo-semantics |
-| 8 | Participant replacement preserves invocation semantics | **compiled** | InvocationPolicy is cognition data (snapshot member, serialization v7); policy lookup never reads participant fields; transport miniature | repo-semantics |
+| 8 | Participant replacement preserves invocation semantics | **compiled** | InvocationPolicy is cognition data and travels with Snapshot. The frozen representation is serialization v8 (explicit InvocationPolicy presence; optional ClaimClass predicate; RequirementBoundary); v6/v7 compatibility semantics remain explicitly preserved; policy lookup never reads participant fields; transport miniature | repo-semantics |
 | 9 | Retrieval backend replacement preserves semantics | **compiled (by absence)** | The ontology depends on no retrieval backend (seed §36); v1 resolution is deterministic string matching — no semantic machinery exists to replace | repo-semantics |
 
 ## Artifact-causal activation acceptance
@@ -73,6 +73,51 @@ debug + release, 8/8 suites green). Verified per plan sec 33:
   (`snap-aea527846a299800`); artifact corruption still fails closed;
 - pit traceability green (40 named tests, P-54..P-59 compiled).
 
-**v4 semantics freeze from this head.** Runtime ADL may replace mechanisms
+(V4S-era freeze statement; the FINAL semantic baseline is set by the
+Post-V4S freeze residue closure section below.) Runtime ADL may replace mechanisms
 (string lookup, reference bool, fixed argv vector, in-memory miniature)
 but must preserve the semantic obligations (plan sec 35).
+
+## Post-V4S freeze residue closure (FINAL)
+
+Lineage (preserved history):
+
+```text
+v4.0-v4.6    feature closeout
+55a8fa9      V4S semantic stabilization validated
+4cbc995      residue semantic cleanup validated
+3814a01      freeze record
+e94da9c      accepted merge on draft main
+```
+
+The semantic baseline for Runtime ADL is **`4cbc995`** — the last commit
+changing executable v4 semantics. Subsequent documentation-only commits do
+not move the executable semantic baseline.
+
+Residue validation evidence (bound to executable head
+`4cbc99549c70ef1caa5ccfd6bc15f95607b10322`):
+
+```text
+R-01  empty selector regression:                    PASS
+R-02  CognitiveNeed discretionary-only repr:        PASS
+R-03  reference/corpus truth cleanup:               PASS
+serialization:                                      still v8
+golden:                                             unchanged
+previous v4/V4S tests:                              PASS
+```
+
+Final freeze statement:
+
+```text
+V4S stabilization was validated at 55a8fa9.
+The post-V4S residue semantic cleanup was subsequently validated at
+4cbc995.
+Therefore 4cbc995 is the final executable semantic baseline consumed by
+Runtime ADL.
+3814a01 records the freeze, and e94da9c is the accepted main merge
+containing that baseline.
+Later documentation-only corrections do not alter the frozen executable
+semantic contract.
+```
+
+semantic baseline != documentation commit != merge commit.
