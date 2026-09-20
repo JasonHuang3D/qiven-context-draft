@@ -85,7 +85,7 @@ surfaces the existing `qiven::fnv1a64` for judgment without deciding
 reuse. The OPERATIONAL search machinery (real symbol/dependency index)
 remains execution-time mechanism work outside the draft, per seed §36.
 
-## Phase v4.6 — v4 validation
+## Phase v4.6 — v4 validation (compiled proofs complete; H1 boundary reached)
 
 **Deliverable.** The §41 nine proof obligations executed and recorded;
 delivery profile named per obligation. H1 boundaries are EXPECTED here
