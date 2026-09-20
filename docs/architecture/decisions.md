@@ -347,3 +347,78 @@ against the active lease.
 capability; the type system suffices at this layer.
 
 **Pinned by.** compile-time static_asserts in `persistence_fencing.cpp`.
+
+---
+
+## DR-017 — Roles, designations, and bindings are three constructs, not one
+
+**Context.** Canonical practice uses canonical roles (owner/brother/worker),
+session designations (jason-extended-cognition), and bindings (ADR-0035)
+interchangeably under the word "role". The draft types only the first (a
+closed enum) and half of the third; designations exist only in prose.
+`jason-extended-cognition` does not fit the enum and force-fitting it would
+freeze a session-scoped adaptation into permanent authority topology.
+
+**Decision.** Three-tier separation (`participant-model.md` §3):
+`RoleSpec` is cognition data — authorities, duties, capability-class floor,
+ratification provenance — participant-independent by construction; the
+canonical set stays closed at the type level, widened only by governance
+transaction + code change. `SessionDesignation` is a runtime sidecar:
+owner-granted per session, never self-assigned, with the structural
+invariant authority-delta = ∅ (process widening only). Bindings name
+implementations and create no authority (per DR-008/ADR-0035). An LLM may
+propose a RoleSpec; only the owner ratifies one — a participant cannot
+enlarge the space of authorities it may hold (self-certification ban class).
+
+**Rejected.** (a) Runtime-mintable free-form RoleId — authority forgery
+with extra steps; the 2026-09-20 publication-sweep incident is the failure
+class it multiplies. (b) extended-cognition as a fourth enum member —
+violates its own session-scoped definition. (c) Designation as a view-only
+concept with no runtime type — grants become unauditable in the loop.
+
+**Pinned by.** designation authority-delta construction test (Phase 5);
+RoleSpec provenance integrity checks; I-PM3.
+
+## DR-018 — Workflow profiles are layered projections, not participant-bound documents
+
+**Context.** Workflow docs accreted four layers (canonical law,
+capability-class procedure, role choreography, environment ergonomics) in
+one file, developing undeclared dependencies on nearly every participant
+axis; copies of canonical law inside workflows silently diverge
+(stale-reference cleanup class, 2026-09-20).
+
+**Decision.** Four-layer model with lawful homes and a per-sentence
+substitution test (`participant-model.md` §4). Workflow profiles are
+read-time pure DERIVED artifacts — projections of policy × capability
+class × environment class × human preferences — same resolution shape as
+views (S1-R2): never authority, never invented adaptation. Forbidden
+edges: workflow → concrete model instance; workflow → named human beyond a
+preference profile; workflow → authority production (consume policy,
+choreograph gates, never mint or waive).
+
+**Rejected.** (a) Splitting every workflow into four physical files —
+ceremony without checkability; the classification test is per-sentence,
+not per-file. (b) Promoting all ergonomics to canonical surfaces —
+device-specific path facts do not belong in identity-independent truth.
+
+**Pinned by.** I-PM4 scoped lint; workflow-resolution purity test.
+
+## DR-019 — Participant dependency is declared and auditable, not assumed
+
+**Context.** Independence existed as slogans ("project truth is
+identity-independent") but never as an auditable surface; the owner's 2026-
+09-20 question demanded the full produce/consume/authorize audit.
+
+**Decision.** The participant dependency matrix (`participant-model.md` §5)
+is corpus law: authority has exactly one source (the human principal
+through policy); every other participant class is a capability, a channel,
+or a safety control. The I-PM invariant set (I-PM1..6) makes independence
+checkable, with explicit SCOPING: evidence, audits, qualification records,
+and state lawfully name instances; normative surfaces must not.
+
+**Rejected.** Treating independence as a single bit — it is per-axis; a
+role is instance-independent and exercise-dependent at once, and the
+workflow layer test is per-sentence. Unscoped "no instance names anywhere"
+lints — they over-fire on lawful provenance and get ignored.
+
+**Pinned by.** I-PM scoped lints; I-PM6 bundle blindness test.
