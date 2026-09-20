@@ -42,7 +42,7 @@ if(NOT TARGET qiven::foundation)
 endif()
 
 add_library(qiven-context-draft STATIC)
-add_library(qiven::context-draft ALIAS qiven-context-draft)
+add_library(qiven::context_draft ALIAS qiven-context-draft)
 
 set(
     QIVEN_CONTEXT_DRAFT_PUBLIC_HEADERS
