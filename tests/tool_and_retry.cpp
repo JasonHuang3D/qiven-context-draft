@@ -27,7 +27,6 @@ int main()
         contract.tool         = "qiven";
         contract.operation    = "gate";
         contract.argvTemplate = { "python", "tools/qiven.py", "gate", "{subject}" };
-        contract.allowedFlags = { "--json", "--verbose" };
 
         ActionIntent intent;
         intent.kind      = ActionKind::InvokeTool;
@@ -86,11 +85,11 @@ int main()
             intent.priorFailure = f;                                    // same signature
             return intent;
         }();
-        QCD_CHECK(!retry_permitted(prior, retry, false)); // identical + no evidence: REFUSED
-        QCD_CHECK(retry_permitted(prior, retry, true));   // evidence added: permitted
+        QCD_CHECK(!retry_permitted(prior, retry, RetryEvidenceState {}));      // REFUSED
+        QCD_CHECK(retry_permitted(prior, retry, RetryEvidenceState { true })); // permitted
 
         retry.tool = "git"; // a different tool is not an equivalent retry
-        QCD_CHECK(retry_permitted(prior, retry, false));
+        QCD_CHECK(retry_permitted(prior, retry, RetryEvidenceState {}));
     }
 
     std::printf("[ OK ] tool contracts + retry discipline: A6 guess fails, A7 blind retry refused\n");

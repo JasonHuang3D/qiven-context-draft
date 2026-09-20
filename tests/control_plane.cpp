@@ -240,7 +240,7 @@ int main()
         QCD_CHECK(!packet.ready_for_judgment()); // search is mandatory pre-judgment
 
         ExistingImplementationReport unsearched; // the mechanism never ran
-        QCD_CHECK(!primitive_judgment_authorized(intent, unsearched));
+        QCD_CHECK(!primitive_judgment_precondition_met(intent, unsearched));
 
         ExistingImplementationReport searched; // it ran and FOUND the duplicate
         LowerLayerHit hit;
@@ -249,7 +249,7 @@ int main()
         hit.summary       = "canonical hashing";
         searched.searched = true;
         searched.hits.push_back(hit);
-        QCD_CHECK(primitive_judgment_authorized(intent, searched));
+        QCD_CHECK(primitive_judgment_precondition_met(intent, searched));
         QCD_CHECK(searched.hits.front().symbol == "qiven::fnv1a64"); // surfaced
     }
 

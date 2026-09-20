@@ -419,14 +419,17 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
 // constructs and validates the concrete invocation. Guessing syntax where
 // a contract exists is the A6 failure class (the CLI-retry odyssey).
 
-struct ToolContract // the declared, machine-readable argv contract
+struct ToolContract // the declared, machine-readable argv contract.
+                    // V4S-05 (S1-04): a FIXED argv template only - this
+                    // reference contract implements no flag semantics, and no
+                    // field may advertise behavior the miniature does not
+                    // implement. Production argv schemas belong to ADL.
 {
     std::string tool;                      // "qiven"
     std::string operation;                 // "gate"
     std::vector<std::string> argvTemplate; // fixed words and {placeholders}:
-                                           // e.g. {"{python}", "tools/qiven.py",
+                                           // e.g. {"python", "tools/qiven.py",
                                            //  "{operation}", "{subject}"}
-    std::vector<std::string> allowedFlags; // "--json", "--verbose", ...
 };
 
 [[nodiscard]] inline bool is_placeholder(const std::string& word)
@@ -510,11 +513,15 @@ struct ExistingImplementationReport // the evidence judgment receives
     std::vector<LowerLayerHit> hits; // what already exists
 };
 
-// Authorization to proceed to JUDGMENT on a reusable primitive: the search
+// V4S-05 (S1-03): proves the REFERENCE STATE represents a completed
+// search - NOT who performed it. Caller-constructed proof state is
+// acceptable only because this repository proves semantics, not trust
+// provenance; trustworthy search receipts are Runtime ADL territory.
+// Proceed-to-JUDGMENT precondition on a reusable primitive: the search
 // must have run. Hits do NOT decide reuse - they inform it (the aim is to
 // prohibit uninformed duplication, not new implementation: seed §16).
-[[nodiscard]] inline bool primitive_judgment_authorized(const ActionIntent& intent,
-                                                        const ExistingImplementationReport& report)
+[[nodiscard]] inline bool primitive_judgment_precondition_met(const ActionIntent& intent,
+                                                              const ExistingImplementationReport& report)
 {
     if (intent.kind != ActionKind::IntroducePrimitive)
     {
@@ -523,13 +530,20 @@ struct ExistingImplementationReport // the evidence judgment receives
     return report.searched;
 }
 
+// V4S-05 (S1-03): RetryEvidenceState is REFERENCE STATE, not a production
+// evidence capability - it asserts nothing about who observed the evidence.
+struct RetryEvidenceState
+{
+    bool hasNewEvidence { false };
+};
+
 // The retry rule (V4-R3): an equivalent retry — same tool+operation, same
 // normalized failure signature — is permitted ONLY with new evidence.
 [[nodiscard]] inline bool retry_permitted(const FailureFingerprint& prior,
                                           const ActionIntent& candidate,
-                                          bool evidenceAdded)
+                                          const RetryEvidenceState& evidence)
 {
-    if (evidenceAdded)
+    if (evidence.hasNewEvidence)
     {
         return true;
     }
