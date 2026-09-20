@@ -1670,9 +1670,9 @@ std::shared_ptr<const Snapshot> QivenContext::canonical_head_locked()
     return std::make_shared<const Snapshot>(std::move(parsed.snapshot));
 }
 
-std::optional<ViewSpec> QivenContext::ResolveView(const CognitionHandle& handle,
-                                                  const std::string& viewId,
-                                                  ResolveDiagnostic* diag)
+std::optional<ViewSpec> QivenContext::resolve_view(const CognitionHandle& handle,
+                                                   const std::string& viewId,
+                                                   ResolveDiagnostic* diag)
 {
     QIVEN_ASSERT(handle != nullptr);
     const auto reset = [&](ResolveDiagnostic::Kind kind) -> std::optional<ViewSpec> {
@@ -1708,7 +1708,7 @@ std::optional<ViewSpec> QivenContext::ResolveView(const CognitionHandle& handle,
     return reset(ResolveDiagnostic::Kind::NotFound); // S1-R2: fall back, never invent
 }
 
-ContextBundle QivenContext::BuildBundle(const CognitionHandle& handle, const Query& query)
+ContextBundle QivenContext::build_bundle(const CognitionHandle& handle, const Query& query)
 {
     QIVEN_ASSERT(handle != nullptr);
     const Snapshot& snapshot = *handle->state;

@@ -167,7 +167,7 @@ int main()
         const CognitionHandle handle = materialize(sample_snapshot());
         Query query;
         query.taskScope            = "participant audit";
-        const ContextBundle bundle = QivenContext::BuildBundle(handle, query);
+        const ContextBundle bundle = QivenContext::build_bundle(handle, query);
 
         std::string bundleText;
         for (const auto& input : bundle.mandatoryInputs)

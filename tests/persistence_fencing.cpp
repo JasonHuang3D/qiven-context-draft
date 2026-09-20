@@ -262,7 +262,7 @@ int main()
     QCD_CHECK(QivenContext::write_to_cognition(writer2, ordinary, *g1b).outcome == Verdict::Outcome::Applied);
     QivenContext::release_grant(*g1b);
 
-    // --- Work-cycle level: AUTHORITY-BOUND H2 (review §5) ----------------------
+    // --- work-cycle level: AUTHORITY-BOUND H2 (review §5) ----------------------
 
     Human human { "Jason", {}, "github:JasonHuang3D" };
     auto llm              = std::make_shared<LLM>();
@@ -287,7 +287,7 @@ int main()
         return transaction;
     };
     std::string result;
-    human.UseLLMToWork(client, "accept without review", result);
+    human.use_llm_to_work(client, "accept without review", result);
     QCD_CHECK(result.find("handoff-missing") != std::string::npos);
     QCD_CHECK(llm->checkpoint.nextAction.find("halt") != std::string::npos);
     QCD_CHECK(llm->parkedDeltas.empty()); // retrying is forbidden; nothing parked
@@ -296,7 +296,7 @@ int main()
     llm->deltaGenerator = [](const std::string&, const Snapshot&) {
         return decisionTx(RevisionId {}, 37, true, "typed human handoffs");
     };
-    human.UseLLMToWork(client, "accept with review", result);
+    human.use_llm_to_work(client, "accept with review", result);
     QCD_CHECK(result.find("delta applied") != std::string::npos);
 
     // pit.h2_evidence_rebind_refused: payload changed AFTER the review
@@ -317,7 +317,7 @@ int main()
         transaction.h2               = evidence;
         return transaction;
     };
-    human.UseLLMToWork(client, "accept with stale review", result);
+    human.use_llm_to_work(client, "accept with stale review", result);
     QCD_CHECK(result.find("handoff-invalid") != std::string::npos);
 
     // review §5: the H2 gate is AUTHORITY-bound — a reviewer without the root
@@ -337,7 +337,7 @@ int main()
         transaction.h2               = evidence;
         return transaction;
     };
-    human.UseLLMToWork(client, "accept with unauthorized review", result);
+    human.use_llm_to_work(client, "accept with unauthorized review", result);
     QCD_CHECK(result.find("handoff-invalid") != std::string::npos);
 
     // pit.self_review_refused (P-09): reviewer binding == author binding
@@ -356,7 +356,7 @@ int main()
         transaction.h2               = evidence;
         return transaction;
     };
-    human.UseLLMToWork(client, "self review", result);
+    human.use_llm_to_work(client, "self review", result);
     QCD_CHECK(result.find("handoff-invalid") != std::string::npos);
 
     // review §5: an empty reviewRef is a HandoffMissing, not a pass
@@ -374,7 +374,7 @@ int main()
         transaction.h2               = evidence; // reviewRef EMPTY
         return transaction;
     };
-    human.UseLLMToWork(client, "accept without review ref", result);
+    human.use_llm_to_work(client, "accept without review ref", result);
     QCD_CHECK(result.find("handoff-missing") != std::string::npos);
 
     // pit invariant: duplicate decision id → InvariantFailed → DesignReview
@@ -382,7 +382,7 @@ int main()
         const std::int64_t taken = snapshot.decisions.empty() ? 1 : snapshot.decisions.back().id;
         return decisionTx(RevisionId {}, taken, true, "duplicate id");
     };
-    human.UseLLMToWork(client, "duplicate decision id", result);
+    human.use_llm_to_work(client, "duplicate decision id", result);
     QCD_CHECK(result.find("invariant-failed") != std::string::npos);
     QCD_CHECK(llm->checkpoint.nextAction.find("design review") != std::string::npos);
 
@@ -606,10 +606,10 @@ int main()
     ResolveDiagnostic diagnostic;
     {
         const auto w            = fresh();
-        const auto resolvedView = QivenContext::ResolveView(w, "zcode-jason", &diagnostic);
+        const auto resolvedView = QivenContext::resolve_view(w, "zcode-jason", &diagnostic);
         QCD_CHECK(resolvedView.has_value() && diagnostic.kind == ResolveDiagnostic::Kind::None);
         QCD_CHECK(resolvedView->human == "Jason");
-        QCD_CHECK(!QivenContext::ResolveView(w, "chatgpt-jason", &diagnostic).has_value());
+        QCD_CHECK(!QivenContext::resolve_view(w, "chatgpt-jason", &diagnostic).has_value());
         QCD_CHECK(diagnostic.kind == ResolveDiagnostic::Kind::NotFound); // never invented
     }
 
@@ -617,7 +617,7 @@ int main()
     // real content, not counts; the budget shrinks candidates only
     {
         const auto w           = fresh();
-        const auto starved     = QivenContext::BuildBundle(w, Query { "task", 1 });
+        const auto starved     = QivenContext::build_bundle(w, Query { "task", 1 });
         bool floorConstitution = false;
         bool floorGovernance   = false;
         bool floorBoundary     = false;
@@ -640,7 +640,7 @@ int main()
         QCD_CHECK(!starved.protectedConstraints.empty());
         // (shrunk-to-budget asserted after `rich` below)
         QCD_CHECK(!starved.omissions.empty()); // the shrink is EXPLAINED
-        const auto rich = QivenContext::BuildBundle(w, Query { "task", 0 });
+        const auto rich = QivenContext::build_bundle(w, Query { "task", 0 });
         QCD_CHECK(starved.candidates.size() < rich.candidates.size()); // shrunk
         QCD_CHECK(rich.candidates.size() > starved.candidates.size());
         QCD_CHECK(rich.mandatoryInputs.size() == starved.mandatoryInputs.size());
@@ -800,7 +800,7 @@ int main()
                                                          .provenanceRef = "runtime-rebirth-test" });
             return transaction;
         };
-        humanA->UseLLMToWork(clientA, "generation A write", rebirthResult);
+        humanA->use_llm_to_work(clientA, "generation A write", rebirthResult);
         QCD_CHECK(rebirthResult.find("delta applied") != std::string::npos);
     } // every Generation-A participant is DESTROYED here; the store survives
 
@@ -844,7 +844,7 @@ int main()
                                                      .provenanceRef = "runtime-rebirth-test" });
         return transaction;
     };
-    humanB->UseLLMToWork(clientB2, "generation B continue", continueResult);
+    humanB->use_llm_to_work(clientB2, "generation B continue", continueResult);
     QCD_CHECK(continueResult.find("delta applied") != std::string::npos);
 
     std::printf("[ OK ] persistence fencing gates + pit regression suite + rebirth\n");

@@ -1,6 +1,6 @@
 // ============================================================================
 // cognition_loop — runnable demo of the v3 architecture:
-// boot -> grant -> Work cycles through the gated write (typed verdicts and
+// boot -> grant -> work cycles through the gated write (typed verdicts and
 // recovery-as-data) -> reader boot preserves the writer -> restore quarantined
 // ============================================================================
 
@@ -67,11 +67,11 @@ int main()
 
     std::string result;
     // cycle 1: supervised mutating write — passes every gate
-    human->UseLLMToWork(client, "run the draft loop", result);
+    human->use_llm_to_work(client, "run the draft loop", result);
     std::printf("[ %s ] cycle1      %s\n", llm->parkedDeltas.empty() ? "OK" : "FAIL", result.c_str());
 
     // cycle 2: unattended mutating write — refused; recovery = defer (ADR-0036)
-    human->UseLLMToWork(client, "background maintenance", result);
+    human->use_llm_to_work(client, "background maintenance", result);
     std::printf("[ OK ] cycle2      %s\n", result.c_str());
 
     // cycle 3: decision acceptance without the typed H2 evidence — refused;
@@ -81,7 +81,7 @@ int main()
         transaction.operations.push_back(Operation { .kind = Operation::Kind::AppendDecision, .recordId = 37, .title = "ADR-draft", .payload = "accept the specification" });
         return transaction;
     };
-    human->UseLLMToWork(client, "accept without review", result);
+    human->use_llm_to_work(client, "accept without review", result);
     std::printf("[ OK ] cycle3      %s\n", result.c_str());
 
     // cycle 4: with content-bound H2 evidence — accepted; the durable token advances
@@ -97,7 +97,7 @@ int main()
         transaction.h2               = evidence;
         return transaction;
     };
-    human->UseLLMToWork(client, "accept with review", result);
+    human->use_llm_to_work(client, "accept with review", result);
     std::printf("[ %s ] cycle4      %s\n", result.find("delta applied") != std::string::npos ? "OK" : "FAIL",
                 result.c_str());
 
