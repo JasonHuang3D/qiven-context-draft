@@ -125,7 +125,18 @@ unchanged; the trigger column is the v4 addition):
 | P-57 | VerifyCanonical/InspectKnownPit routed through generic substring memory recall; prose similarity could satisfy blocking requirements | V4S plan S0-04; decoy tests | PROC | MandatoryRecall exact-key; InspectKnownPit via FailureFingerprint only; VerifyCanonical explicit-resolver-only | decoy + fingerprint-connection tests in control_plane | v4S |
 | P-58 | ClaimClass existed on ActionIntent but never affected policy matching - decorative data | V4S plan S1-01 | EPIST | claim-scoped InvocationRule matching (absent = all classes) | claim-axis test in control_plane | v4S |
 | P-59 | ToolContract.allowedFlags advertised flag pass-through the miniature never implemented - dead data with false comments | V4S plan S1-04 | PROC | ToolContract is a fixed argv template; advertise only implemented behavior | tool_and_retry contract tests | v4S |
+| P-60 | Empty FailureFingerprint tool/category selectors reached std::string::find, where "" matches every string - an under-specified fingerprint wildcard-matched unrelated Lesson/Risk records and falsely satisfied a blocking InspectKnownPit | freeze-cleanup plan R-01; V4S review | PROC | ActionKind RetryFailure / InspectKnownPit: empty selectors never participate in matching | pit.empty_failure_selector_never_matches + T2 blocked-control regression in tool_and_retry | v4S |
+| P-61 | CognitiveNeed carried a decorative `mandatory` bool advertising power the type does not possess - discretionary data hinting at self-promotion into policy | freeze-cleanup plan R-02 | EPIST | CognitiveNeed is ALWAYS discretionary; mandatory obligations originate only from InvocationPolicy | T4 needs-cannot-alter-mandatory-shape regression in control_plane | v4S |
 
-Backlog (inventory §5): tool-contract invocation routing (A6); failure-
-fingerprint batched evidence (A7); lower-layer search (A8). Merge-class
-full-gate proof (A5/P-53) compiled 2026-09-20.
+## Runtime mechanisms deferred after v4 semantic closeout
+
+The following semantic boundaries are compiled in v4, while their
+production mechanisms remain Runtime-ADL work:
+
+- A6: tool-contract semantics compiled; real harness/tool routing deferred.
+- A7: failure fingerprint + blind-retry semantics compiled; trustworthy
+  evidence provenance and operational failure storage deferred.
+- A8: lower-layer-search obligation and judgment precondition compiled;
+  real symbol/dependency search mechanism deferred.
+
+These are not unresolved v4 semantic backlog items.
