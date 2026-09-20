@@ -284,6 +284,38 @@ struct ToolContract // the declared, machine-readable argv contract
     return true;
 }
 
+// --- v4.5 / A8: lower-layer reuse is checked before primitive creation
+// (seed §16): the search itself is an EXECUTION-TIME mechanism (filesystem,
+// dependency graph, symbol index live outside cognition); the control
+// plane owns the boundary - the search is mandatory, the report must
+// exist before judgment, and uninformed duplication is refused.
+
+struct LowerLayerHit // one existing implementation the search surfaced
+{
+    std::string repo;    // "qiven-foundation"
+    std::string symbol;  // "qiven::fnv1a64"
+    std::string summary; // what it provides
+};
+
+struct ExistingImplementationReport // the evidence judgment receives
+{
+    bool searched { false };         // the mechanism actually ran
+    std::vector<LowerLayerHit> hits; // what already exists
+};
+
+// Authorization to proceed to JUDGMENT on a reusable primitive: the search
+// must have run. Hits do NOT decide reuse - they inform it (the aim is to
+// prohibit uninformed duplication, not new implementation: seed §16).
+[[nodiscard]] inline bool primitive_judgment_authorized(const ActionIntent& intent,
+                                                        const ExistingImplementationReport& report)
+{
+    if (intent.kind != ActionKind::IntroducePrimitive)
+    {
+        return true; // not this boundary
+    }
+    return report.searched;
+}
+
 // --- v4.4 / A7: failure is an invocation trigger (seed §18/§19) ----------
 // A material failure creates evidence; the next action must not be an
 // equivalent retry with nothing new (V4-R3: blind retry is not recovery).

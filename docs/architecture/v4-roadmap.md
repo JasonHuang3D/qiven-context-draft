@@ -70,16 +70,20 @@ strips timestamps/temp paths; the fingerprint recalls the recorded
 odyssey pit; the equivalent retry without new evidence is REFUSED
 (V4-R3), with evidence or a different operation permitted.
 
-## Phase v4.5 — Creation-boundary activation
+## Phase v4.5 — Creation-boundary activation ✅
 
 **Deliverable.** A2 residual: naming-policy activation at identifier
 creation inside working sessions (not just repo entry); A8: eligible-
 lower-layer search before reusable-primitive authoring (dependency graph +
 symbol search machinery — the largest item).
 
-**Proof.** §41 scenarios 1-2: fresh-runtime symbol creation carries the
-convention in its packet; a proposed Foundation-duplicate primitive is
-intercepted with the existing implementation surfaced.
+**Proof.** LANDED 2026-09-20: scenario 1 shipped with v4.3
+(`control_plane.cpp` naming case + transport miniature); scenario 2 in
+miniature now too — `primitive_judgment_authorized` refuses an
+IntroducePrimitive judgment whose search never ran, and the report
+surfaces the existing `qiven::fnv1a64` for judgment without deciding
+reuse. The OPERATIONAL search machinery (real symbol/dependency index)
+remains execution-time mechanism work outside the draft, per seed §36.
 
 ## Phase v4.6 — v4 validation
 
