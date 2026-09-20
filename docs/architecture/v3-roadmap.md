@@ -108,11 +108,11 @@ delivery profile named:
    candidate semantics accepted into kernel design or returned with concrete
    deltas.
 
-## Phase 5 — Participant model hardening (PROPOSED — not accepted)
+## Phase 5 — Participant model hardening (ACCEPTED 2026-09-20)
 
-**Status.** Proposed by `participant-model.md` (2026-09-20, DR-017/018/019),
-pending owner review. Nothing lands until this phase is accepted; the corpus
-rules, headers do not advance ahead of it.
+**Status.** Proposed by `participant-model.md` (2026-09-20, DR-017/018/019);
+accepted by owner direction the same day ("随后进入draft Phase5"). Landing
+under the 2026-09-20 long-running window; publication at window close.
 
 **Deliverable.**
 
