@@ -227,7 +227,7 @@ int main()
         const PreparationPacket legacyPacket =
             build_preparation_packet(*legacyRestored->state, legacyIntent);
         QCD_CHECK(legacyPacket.failure == PreparationFailure::InvocationPolicyMissing);
-        QCD_CHECK(!legacyPacket.ready());
+        QCD_CHECK(!legacyPacket.ready_for_judgment());
     }
 
     // pit.port_never_reenters_service (P-42): the identity port receives the

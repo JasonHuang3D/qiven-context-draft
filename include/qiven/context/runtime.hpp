@@ -127,6 +127,32 @@ struct CognitiveRequirement // a derived, action-scoped requirement
     bool blocking { true };
 };
 
+enum class RequirementStatus // V4S-02: derivation and satisfaction are
+{                            // SEPARATE concepts (S0-03). A requirement that
+    Pending,                 // is merely LISTED is not satisfied.
+    Satisfied,               // an explicit resolver produced evidence
+    Failed,                  // resolution was attempted and failed (blocking)
+};
+
+struct PreparedRequirement // one derived requirement with its lifecycle
+{
+    CognitiveRequirement requirement;
+    RequirementBoundary boundary { RequirementBoundary::BeforeJudgment };
+    RequirementStatus status { RequirementStatus::Pending };
+    std::vector<std::string> evidence; // what satisfied it (reference state:
+                                       // caller-constructed evidence proves
+                                       // SEMANTICS here, not trust provenance)
+};
+
+// Reference-state satisfaction marker for tests and future resolvers. The
+// stabilization deliberately does NOT define who may mint trustworthy
+// satisfaction - that is Runtime ADL territory (plan sec 25).
+inline void mark_satisfied(PreparedRequirement& prepared, std::string evidence)
+{
+    prepared.status = RequirementStatus::Satisfied;
+    prepared.evidence.push_back(std::move(evidence));
+}
+
 enum class PreparationFailure // S0-02: absence must be a TYPED failure, never
 {                             // an implicit "no requirements" fail-open state
     None,
@@ -138,31 +164,65 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
 {                        // is selected by POLICY OBLIGATIONS attached to the
                          // action, not by similarity alone (§21).
     ActionIntent intent;
-    std::vector<CognitiveRequirement> requirements;          // all derived demands
+    std::vector<PreparedRequirement> requirements;           // derived demands + lifecycle
     std::vector<std::string> mandatoryContext;               // resolved cognition
     std::vector<std::string> knownPits;                      // resolved pit records
     std::vector<std::string> liveFacts;                      // filled by live ports
-    std::vector<CognitiveRequirement> unresolved;            // blocking recall failures
     PreparationFailure failure { PreparationFailure::None }; // S0-02
 
-    [[nodiscard]] bool ready() const
+    // S0-03: the single ambiguous ready() is REPLACED by two explicit
+    // questions. Listed is never satisfied; blocking Pending/Failed gates.
+    [[nodiscard]] bool ready_for_judgment() const
     {
-        return failure == PreparationFailure::None && unresolved.empty();
+        if (failure != PreparationFailure::None)
+        {
+            return false;
+        }
+        for (const auto& prepared : requirements)
+        {
+            if (prepared.requirement.blocking &&
+                prepared.boundary == RequirementBoundary::BeforeJudgment &&
+                prepared.status != RequirementStatus::Satisfied)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool ready_for_execution() const
+    {
+        if (failure != PreparationFailure::None)
+        {
+            return false;
+        }
+        for (const auto& prepared : requirements)
+        {
+            if (prepared.requirement.blocking &&
+                prepared.status != RequirementStatus::Satisfied)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
 // Derive the control-plane demands for an intent from the snapshot's
 // invocation policy. Pure: same snapshot + intent => same requirements.
-[[nodiscard]] inline std::vector<CognitiveRequirement> derive_requirements(
+[[nodiscard]] inline std::vector<PreparedRequirement> derive_requirements(
     const Snapshot& snapshot, const ActionIntent& intent)
 {
-    std::vector<CognitiveRequirement> out;
+    std::vector<PreparedRequirement> out;
     for (const auto& rule : snapshot.invocation.rules)
     {
         if (rule.action == intent.kind)
         {
-            out.push_back(CognitiveRequirement { rule.requirement, rule.subject,
-                                                 rule.blocking });
+            out.push_back(PreparedRequirement {
+                CognitiveRequirement { rule.requirement, rule.subject, rule.blocking },
+                rule.boundary,
+                RequirementStatus::Pending,
+                {} });
         }
     }
     return out;
@@ -187,14 +247,20 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
         return packet;
     }
     packet.requirements = derive_requirements(snapshot, intent);
-    for (const auto& requirement : packet.requirements)
+    // V4S-02 semantics: only snapshot-local recall attempts transition a
+    // status; every other requirement stays Pending until an explicit
+    // resolver exists (V4S-03 narrows the auto-resolved set further).
+    // A blocking recall that finds nothing becomes Failed - the action is
+    // not ready for judgment (seed sec 28 step 7).
+    for (auto& prepared : packet.requirements)
     {
-        const bool recallClass = requirement.kind == RequirementKind::MandatoryRecall ||
+        const CognitiveRequirement& requirement = prepared.requirement;
+        const bool recallClass                  = requirement.kind == RequirementKind::MandatoryRecall ||
                                  requirement.kind == RequirementKind::VerifyCanonical ||
                                  requirement.kind == RequirementKind::InspectKnownPit;
         if (!recallClass)
         {
-            continue; // an action-class demand: listed, satisfied at execution
+            continue; // an action-class demand: listed Pending, satisfied at execution
         }
         bool resolved = false;
         for (const auto& record : snapshot.memory)
@@ -203,6 +269,7 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
                 record.statement.find(requirement.subject) != std::string::npos)
             {
                 packet.mandatoryContext.push_back(record.title + ": " + record.statement);
+                prepared.evidence.push_back(record.title);
                 resolved = true;
             }
         }
@@ -211,12 +278,21 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
             if (profile.id.find(requirement.subject) != std::string::npos)
             {
                 packet.mandatoryContext.push_back(profile.id + ": " + profile.summary);
+                prepared.evidence.push_back(profile.id);
                 resolved = true;
             }
         }
-        if (!resolved && requirement.blocking)
+        if (resolved)
         {
-            packet.unresolved.push_back(requirement);
+            prepared.status = RequirementStatus::Satisfied;
+        }
+        else if (requirement.blocking)
+        {
+            prepared.status = RequirementStatus::Failed;
+            if (packet.failure == PreparationFailure::None)
+            {
+                packet.failure = PreparationFailure::RequiredRecallMissing;
+            }
         }
     }
     return packet;
