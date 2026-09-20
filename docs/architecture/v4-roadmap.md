@@ -55,7 +55,7 @@ identical preparation); fail-closed unresolved recall; listed action-class
 demands; purity. `default_invocation_policy()` encodes P-51/52/53 and the
 structural boundaries as policy data. Serialization v7, golden re-pinned.
 
-## Phase v4.4 — Remaining high-value triggers
+## Phase v4.4 — Remaining high-value triggers ✅
 
 **Deliverable.** A6 tool-contract invocation routing (Operator-declared
 argv drives invocation; guessing forbidden where a contract exists);
@@ -63,22 +63,29 @@ A7 failure-fingerprint + batched evidence (first material failure captures
 fingerprint + retrieves related pits; repeated identical signature refuses
 blind retry).
 
-**Proof.** A6: a contract-bearing invocation constructed mechanically; a
-bypass attempt fails. A7: fingerprint index lookup returns the recorded
-pit; the second identical failure without new evidence is refused.
+**Proof.** LANDED 2026-09-20 (`tests/tool_and_retry.cpp`): A6 — the
+contract constructs the argv; three guessed-variant shapes (wrong layout,
+typo flag, renamed operation) all FAIL validation. A7 — normalization
+strips timestamps/temp paths; the fingerprint recalls the recorded
+odyssey pit; the equivalent retry without new evidence is REFUSED
+(V4-R3), with evidence or a different operation permitted.
 
-## Phase v4.5 — Creation-boundary activation
+## Phase v4.5 — Creation-boundary activation ✅
 
 **Deliverable.** A2 residual: naming-policy activation at identifier
 creation inside working sessions (not just repo entry); A8: eligible-
 lower-layer search before reusable-primitive authoring (dependency graph +
 symbol search machinery — the largest item).
 
-**Proof.** §41 scenarios 1-2: fresh-runtime symbol creation carries the
-convention in its packet; a proposed Foundation-duplicate primitive is
-intercepted with the existing implementation surfaced.
+**Proof.** LANDED 2026-09-20: scenario 1 shipped with v4.3
+(`control_plane.cpp` naming case + transport miniature); scenario 2 in
+miniature now too — `primitive_judgment_authorized` refuses an
+IntroducePrimitive judgment whose search never ran, and the report
+surfaces the existing `qiven::fnv1a64` for judgment without deciding
+reuse. The OPERATIONAL search machinery (real symbol/dependency index)
+remains execution-time mechanism work outside the draft, per seed §36.
 
-## Phase v4.6 — v4 validation
+## Phase v4.6 — v4 validation (compiled proofs complete; H1 boundary reached)
 
 **Deliverable.** The §41 nine proof obligations executed and recorded;
 delivery profile named per obligation. H1 boundaries are EXPECTED here

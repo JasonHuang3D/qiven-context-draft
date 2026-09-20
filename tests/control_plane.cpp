@@ -161,7 +161,33 @@ int main()
                   first.intent.priorFailure->operation == "qiven gate");
     }
 
+    // --- v4.5 / A8 scenario (seed 41-2 in miniature): a Foundation duplicate
+    // is intercepted - the search is mandatory and the existing
+    // implementation is surfaced for judgment, never auto-decided ------
+    {
+        const Snapshot snapshot = sample_snapshot();
+        ActionIntent intent;
+        intent.kind                    = ActionKind::IntroducePrimitive;
+        intent.concepts                = { "hash" };
+        const PreparationPacket packet = build_preparation_packet(snapshot, intent);
+        QCD_CHECK(hasRequirement(packet.requirements, RequirementKind::SearchLowerLayer));
+        QCD_CHECK(packet.unresolved.empty()); // the demand is execution-time
+
+        ExistingImplementationReport unsearched; // the mechanism never ran
+        QCD_CHECK(!primitive_judgment_authorized(intent, unsearched));
+
+        ExistingImplementationReport searched; // it ran and FOUND the duplicate
+        LowerLayerHit hit;
+        hit.repo          = "qiven-foundation";
+        hit.symbol        = "qiven::fnv1a64";
+        hit.summary       = "canonical hashing";
+        searched.searched = true;
+        searched.hits.push_back(hit);
+        QCD_CHECK(primitive_judgment_authorized(intent, searched));
+        QCD_CHECK(searched.hits.front().symbol == "qiven::fnv1a64"); // surfaced
+    }
+
     std::printf("[ OK ] control plane: naming scenario, transport-stable activation, "
-                "fail-closed recall, listed action-class demands\n");
+                "fail-closed recall, listed action-class demands, lower-layer interception\n");
     return 0;
 }
