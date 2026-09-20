@@ -104,6 +104,30 @@ enum class Role // canonical authority packages (R4)
     Worker,
 };
 
+enum class CapabilityClass // participant capability CLASSES (DR-017); never
+{                          // instances — the floor a binding must satisfy
+    None,                  // no execution reach required
+    LocalSupervised,       // foreground owner-supervised local execution
+    HostBrokered,          // through the accepted Host authority path (ADR-0026)
+};
+
+struct CapabilityRequirements // the role floor: "can this binding exercise it?"
+{
+    bool reviewGradeReasoning { false }; // brother floor (ADR-0035 qualification)
+    CapabilityClass execution { CapabilityClass::None };
+    bool identityPortVerified { false }; // owner floor: human principal authentication
+};
+
+enum class WorkflowLayer   // DR-018: workflow-profile dependency layering; the
+{                          // default overclaims DEPENDENCE, never independence —
+                           // an undeclared layer must fail classification review,
+                           // not silently pass as participant-independent
+    CanonicalLaw,          // participant-independent process law
+    CapabilityProcedure,   // capability-class procedure
+    RoleChoreography,      // role-partition choreography (instances never)
+    EnvironmentErgonomics, // concrete device/tool/human ergonomics (verify-live)
+};
+
 enum class Handoff // typed human handoffs (ADR-0036)
 {
     H_None,              // no handoff required for this operation class
@@ -235,6 +259,19 @@ struct PolicyTable
     std::vector<RecoveryRule> recovery;
 };
 
+struct RoleSpec // canonical role as governance DATA (R4; DR-017): the registry
+{               // is PolicyTable-adjacent cognition; roles stay participant-
+                // independent by construction — authorities, duties and the
+                // floor reference classes, never instances. An LLM may
+                // propose one; only the owner ratifies (self-certification
+                // ban class), which is what non-empty provenance records.
+    Role id { Role::Worker };
+    std::vector<OperationClass> authorities; // operation classes it may perform
+    std::vector<std::string> duties;         // disclosure, review, worker discipline...
+    CapabilityRequirements floor;            // any binding exercising it satisfies this
+    Provenance provenance;                   // ratification evidence (owner + H2/ADR)
+};
+
 // --- records ---------------------------------------------------------------
 
 struct Decision // decisions/ADR-####.md
@@ -325,6 +362,10 @@ struct ProfileRecord  // the in-snapshot resolution target for view profileRefs
     ContentId id;     // e.g. "views/environments/jasonpc"
     std::string kind; // environment / preference / workflow
     std::string summary;
+    WorkflowLayer layer { WorkflowLayer::EnvironmentErgonomics }; // DR-018:
+                                                                  // dominant layer for workflow profiles; the default
+                                                                  // OVERCLAIMS dependence (fail-safe for I-PM4: an
+                                                                  // undeclared layer is treated as instance-shaped)
 };
 
 struct ViewSpec                           // DURABLE participant adaptation — context, not runtime (DR-008,
@@ -351,5 +392,62 @@ struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
     std::vector<Conflict> conflicts;
     std::vector<ProfileRecord> profiles; // view profileRefs resolve against these
     std::vector<ViewSpec> views;
+    std::vector<RoleSpec> roles; // canonical role registry (DR-017): governance
+                                 // data; widened only by ratified transaction
 };
+
+// --- role registry accessors (fail-closed: an unregistered role has NO
+// authorities — the registry is authority, so absence refuses everything) ----
+
+[[nodiscard]] inline const RoleSpec* find_role_spec(const Snapshot& snapshot, Role role)
+{
+    for (const auto& spec : snapshot.roles)
+    {
+        if (spec.id == role)
+        {
+            return &spec;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] inline bool role_spec_valid(const RoleSpec& spec)
+{
+    // ratification provenance is REQUIRED: an unprovenanced role spec is a
+    // proposal, not a registry entry (constitution #9; DR-017 propose/ratify)
+    return !spec.provenance.empty() && !spec.duties.empty();
+}
+
+// The canonical three, as DATA (mirrors collaboration/operating-contract.md):
+// owner governs; brother authors/reviews; worker executes locally under
+// worker discipline. Authority sets here are candidate design input — the
+// provenance names the ratification source, and amendments are governance
+// transactions, never silent edits.
+[[nodiscard]] inline std::vector<RoleSpec> default_role_specs()
+{
+    const Provenance ratified { std::vector<SourceType> { SourceType {
+        SourceType::Kind::RepositoryFile, "collaboration/operating-contract.md", "" } } };
+    return {
+        { Role::Owner,
+          { OperationClass::DecisionAcceptance, OperationClass::MemoryWrite,
+            OperationClass::ObligationWrite, OperationClass::StateUpdate,
+            OperationClass::ConflictWrite, OperationClass::EvidenceWrite },
+          { "ratify and supersede governance", "accept checkpoints", "delegate authority" },
+          { false, CapabilityClass::None, true },
+          ratified },
+        { Role::Brother,
+          { OperationClass::DecisionAcceptance, OperationClass::MemoryWrite,
+            OperationClass::ObligationWrite, OperationClass::StateUpdate,
+            OperationClass::ConflictWrite, OperationClass::EvidenceWrite },
+          { "architecture and review", "disclosure duty (ADR-0035 rule 4)",
+            "escalate on doubt" },
+          { true, CapabilityClass::None, false },
+          ratified },
+        { Role::Worker,
+          { OperationClass::StateUpdate, OperationClass::EvidenceWrite },
+          { "worker discipline: no push, PR or merge without per-task owner authorization" },
+          { false, CapabilityClass::LocalSupervised, false },
+          ratified },
+    };
+}
 } // namespace qiven::context
