@@ -259,6 +259,68 @@ struct PolicyTable
     std::vector<RecoveryRule> recovery;
 };
 
+// --- v4 control-plane policy as cognition data (cognitive-boundary-model §8/§12) ---
+
+enum class ClaimClass // what kind of claim rides on the action (seed §12:
+{                     // invocation policy is claim-scoped, not thinker-scoped)
+    LocalRecall,      // low-risk; native memory may suffice, failure escalates
+    CanonicalFact,    // canonical cognition is the authority; recall mandatory
+    LiveFact,         // the live source is the authority; verify mandatory
+    EvidenceInterpretation,
+    Judgment, // no lookup can mechanically produce it
+};
+
+enum class ActionKind // externally meaningful proposed transitions (seed §9);
+{                     // NOT thought traces - the interior stays opaque (§23)
+    BeginTask,
+    EnterDomain,
+
+    CreateCppSymbol,    // naming policy must be active (A2/P-51 family)
+    IntroducePrimitive, // lower-layer search first (A8)
+    ModifyArchitecture,
+    ModifyPublicAPI,
+
+    InvokeTool,   // declared contract drives argv (A6)
+    RetryFailure, // fingerprint + evidence before retry (A7)
+
+    MakeCanonicalClaim, // canonical source mandatory (P-38 family)
+    MakeLiveClaim,      // live source mandatory
+
+    ModifyReferencedContract, // dependent sweep first (A3/A4/A9; inventory §4)
+
+    Commit,          // attribution format check (A1/P-51)
+    Publish,         // full-gate receipt + H2 (A5/P-53)
+    AcceptCandidate, // review evidence content-bound (P-05 family)
+};
+
+enum class RequirementKind // what Cognitive Control demands before the
+{                          // action may proceed (seed §27)
+    MandatoryRecall,       // resolve named cognition into the packet
+    SearchLowerLayer,      // eligible lower layers before authoring
+    VerifyCanonical,       // the accepted record, from the tree
+    VerifyLive,            // from the live source, never memory
+    InspectToolContract,   // declared argv schema, never guessed
+    InspectKnownPit,       // fingerprint -> related pits before retry
+    RunMechanicalCheck,    // a compiled guard (gate/lint/sweep)
+    RequestReview,         // typed handoff evidence (H2 class)
+    AskHuman,              // H1/H3/H4 class boundaries
+};
+
+struct InvocationRule // one policy row: WHEN this action crosses the control
+{                     // plane, THESE requirements are mandatory (seed §8)
+    ActionKind action { ActionKind::BeginTask };
+    RequirementKind requirement { RequirementKind::MandatoryRecall };
+    std::string subject; // retrieval key / check name, e.g. "naming policy"
+    bool blocking { true };
+};
+
+struct InvocationPolicy // cognition data (PolicyTable-adjacent): the
+{                       // activation half of the authority table; derives
+                        // from ACCEPTED judgments - default_invocation_policy()
+                        // is the compiled scar backlog (P-51/52/53 as data)
+    std::vector<InvocationRule> rules;
+};
+
 struct RoleSpec // canonical role as governance DATA (R4; DR-017): the registry
 {               // is PolicyTable-adjacent cognition; roles stay participant-
                 // independent by construction — authorities, duties and the
@@ -384,6 +446,7 @@ struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
     Governance governance;
     Constitution constitution;
     PolicyTable policy;
+    InvocationPolicy invocation; // v4 control-plane policy as cognition data
     StateView state;
     std::vector<Decision> decisions;
     std::vector<MemoryRecord> memory;
@@ -416,6 +479,40 @@ struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
     // ratification provenance is REQUIRED: an unprovenanced role spec is a
     // proposal, not a registry entry (constitution #9; DR-017 propose/ratify)
     return !spec.provenance.empty() && !spec.duties.empty();
+}
+
+// The compiled scar backlog as POLICY DATA: every row cites the pit whose
+// acceptance it encodes (judgment -> mechanism traceability, seed §4). These
+// are the v4.1/v4.2 guards and the seed's structural boundaries, expressed
+// as invocation rules the control plane enforces at action boundaries.
+[[nodiscard]] inline InvocationPolicy default_invocation_policy()
+{
+    return {
+        {
+            { ActionKind::Commit, RequirementKind::RunMechanicalCheck,
+              "attribution subject-position lint (P-51)", true },
+            { ActionKind::Publish, RequirementKind::RunMechanicalCheck,
+              "full default gate PASS receipt at exact head (P-53)", true },
+            { ActionKind::Publish, RequirementKind::RequestReview,
+              "H2 exact-delta review", true },
+            { ActionKind::CreateCppSymbol, RequirementKind::MandatoryRecall,
+              "naming policy", true },
+            { ActionKind::IntroducePrimitive, RequirementKind::SearchLowerLayer,
+              "eligible lower layers", true },
+            { ActionKind::InvokeTool, RequirementKind::InspectToolContract,
+              "declared tool argv contract", true },
+            { ActionKind::RetryFailure, RequirementKind::InspectKnownPit,
+              "failure fingerprint related pits", true },
+            { ActionKind::MakeCanonicalClaim, RequirementKind::VerifyCanonical,
+              "canonical record", true },
+            { ActionKind::MakeLiveClaim, RequirementKind::VerifyLive,
+              "live source", true },
+            { ActionKind::ModifyReferencedContract, RequirementKind::MandatoryRecall,
+              "reference integrity sweep (P-52)", true },
+            { ActionKind::AcceptCandidate, RequirementKind::RequestReview,
+              "content-bound H2 evidence", true },
+        }
+    };
 }
 
 // The canonical three, as DATA (mirrors collaboration/operating-contract.md):

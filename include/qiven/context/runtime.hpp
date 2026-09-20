@@ -14,6 +14,7 @@
 
 #include <chrono>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -69,6 +70,141 @@ struct SessionDesignation                     // owner-granted, session-scoped p
 [[nodiscard]] inline bool designation_valid(const SessionDesignation& d)
 {
     return !d.id.empty() && !d.grantRef.empty();
+}
+
+// --- v4 cognitive control plane (runtime exchange types; seed §9/§10/§19/§20) --
+// These are CONTROL-PLANE objects, not cognition: like ParticipantBinding
+// they never enter the tree. The packet is built from the snapshot ONLY -
+// a fresh runtime generation restoring the same bytes derives the same
+// preparation (activation independent of participant memory, §41).
+
+struct FailureFingerprint // seed §19: identity of a failure for pit recall;
+{                         // incidental text (timestamps, temp paths) excluded
+    std::string operation;
+    std::string tool;
+    std::string category;
+    std::string stableMessage;
+    int exitCode {};
+    std::vector<std::string> affectedFiles;
+};
+
+struct ActionIntent // seed §9: an externally meaningful PROPOSED transition;
+{                   // not a thought trace - the interior stays opaque (§23)
+    ActionKind kind { ActionKind::BeginTask };
+    ClaimClass claimClass { ClaimClass::LocalRecall };
+    std::vector<std::string> concepts;
+    std::vector<std::string> files;
+    std::string tool;
+    std::string operation;
+    std::optional<FailureFingerprint> priorFailure; // RetryFailure carries one
+};
+
+enum class CognitiveNeedKind // seed §10: epistemic needs, not tool calls
+{
+    Recall,
+    VerifyCanonicalFact,
+    VerifyLiveFact,
+    SearchExistingImplementation,
+    SearchEvidence,
+    Calculate,
+    Simulate,
+    RequestReview,
+    AskHuman
+};
+
+struct CognitiveNeed // the DISCRETIONARY path (seed §24): judgment recognizes
+{                    // uncertainty and requests; policy may REQUIRE regardless
+    CognitiveNeedKind kind { CognitiveNeedKind::Recall };
+    std::string subject;
+    std::string scope;
+    bool mandatory { false };
+};
+
+struct CognitiveRequirement // a derived, action-scoped requirement
+{
+    RequirementKind kind { RequirementKind::MandatoryRecall };
+    std::string subject;
+    bool blocking { true };
+};
+
+struct PreparationPacket // seed §20: the bridge back into Judgment. Content
+{                        // is selected by POLICY OBLIGATIONS attached to the
+                         // action, not by similarity alone (§21).
+    ActionIntent intent;
+    std::vector<CognitiveRequirement> requirements; // all derived demands
+    std::vector<std::string> mandatoryContext;      // resolved cognition
+    std::vector<std::string> knownPits;             // resolved pit records
+    std::vector<std::string> liveFacts;             // filled by live ports
+    std::vector<CognitiveRequirement> unresolved;   // blocking recall failures
+
+    [[nodiscard]] bool ready() const
+    {
+        return unresolved.empty();
+    }
+};
+
+// Derive the control-plane demands for an intent from the snapshot's
+// invocation policy. Pure: same snapshot + intent => same requirements.
+[[nodiscard]] inline std::vector<CognitiveRequirement> derive_requirements(
+    const Snapshot& snapshot, const ActionIntent& intent)
+{
+    std::vector<CognitiveRequirement> out;
+    for (const auto& rule : snapshot.invocation.rules)
+    {
+        if (rule.action == intent.kind)
+        {
+            out.push_back(CognitiveRequirement { rule.requirement, rule.subject,
+                                                 rule.blocking });
+        }
+    }
+    return out;
+}
+
+// Build the preparation packet: recall-class requirements resolve against
+// the snapshot (memory titles / profile ids as retrieval keys, v1); action-
+// class requirements (verify-live, run-check, ask-human...) are listed as
+// demands whose satisfaction is execution-time, outside this pure builder.
+// A blocking recall that finds nothing lands in `unresolved` - the action
+// may not proceed (seed §28 step 7).
+[[nodiscard]] inline PreparationPacket build_preparation_packet(
+    const Snapshot& snapshot, const ActionIntent& intent)
+{
+    PreparationPacket packet;
+    packet.intent       = intent;
+    packet.requirements = derive_requirements(snapshot, intent);
+    for (const auto& requirement : packet.requirements)
+    {
+        const bool recallClass = requirement.kind == RequirementKind::MandatoryRecall ||
+                                 requirement.kind == RequirementKind::VerifyCanonical ||
+                                 requirement.kind == RequirementKind::InspectKnownPit;
+        if (!recallClass)
+        {
+            continue; // an action-class demand: listed, satisfied at execution
+        }
+        bool resolved = false;
+        for (const auto& record : snapshot.memory)
+        {
+            if (record.title.find(requirement.subject) != std::string::npos ||
+                record.statement.find(requirement.subject) != std::string::npos)
+            {
+                packet.mandatoryContext.push_back(record.title + ": " + record.statement);
+                resolved = true;
+            }
+        }
+        for (const auto& profile : snapshot.profiles)
+        {
+            if (profile.id.find(requirement.subject) != std::string::npos)
+            {
+                packet.mandatoryContext.push_back(profile.id + ": " + profile.summary);
+                resolved = true;
+            }
+        }
+        if (!resolved && requirement.blocking)
+        {
+            packet.unresolved.push_back(requirement);
+        }
+    }
+    return packet;
 }
 
 struct EvidenceGap          // typed absence: gaps are RECORDED, never synthesized
