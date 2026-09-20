@@ -1,5 +1,5 @@
 // ============================================================================
-// runtime.cpp — the causal Work cycle (numbered steps are normative)
+// runtime.cpp — the causal work cycle (numbered steps are normative)
 //
 // DR-002: the model never chooses its own recovery. A refusal's reason is
 // looked up in the policy table carried by cognition, and the mandated next
@@ -39,7 +39,7 @@ constexpr std::string_view refusalName(RefusalReason reason)
 }
 } // namespace
 
-void LLM::Work(const std::string& prompt, const AuthenticatedActor& actor, std::string& result,
+void LLM::work(const std::string& prompt, const AuthenticatedActor& actor, std::string& result,
                WorkMode mode)
 {
     const auto turnStart = std::chrono::steady_clock::now(); // session economics (DR-012)

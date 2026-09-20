@@ -10,7 +10,7 @@
 //    They are distinct types and must never share a value space again.
 //  - IMMUTABLE MATERIALIZATIONS (review §2): a write mints a SUCCESSOR
 //    Materialization; nothing mutates a published one. Participants pinning a
-//    handle see one consistent world for their whole Work cycle — the alias
+//    handle see one consistent world for their whole work cycle — the alias
 //    data race between read_from_cognition and the publish path is gone.
 //  - TYPED STORE RECEIPTS (review §6): compareAndSwap returns
 //    Committed / CompareFailed / OutcomeUnknown — a CAS failure (definitely
@@ -143,7 +143,7 @@ enum class QuarantineState
 
 // A Materialization is IMMUTABLE once minted (review §2): a write produces a
 // SUCCESSOR materialization; nothing mutates a published one. A participant
-// pinning a handle therefore sees one consistent world for its whole Work
+// pinning a handle therefore sees one consistent world for its whole work
 // cycle, and readers never race the publish path.
 struct Materialization
 {
@@ -494,14 +494,14 @@ public:
     // view resolution: a pure read-time transformation. Unknown ids fall back
     // to the identity-independent context (nullopt + NotFound) — a participant
     // combination is never invented (S1-R2); invalid refs fail compilation.
-    [[nodiscard]] static std::optional<ViewSpec> ResolveView(const CognitionHandle& handle,
-                                                             const std::string& viewId,
-                                                             ResolveDiagnostic* diag = nullptr);
+    [[nodiscard]] static std::optional<ViewSpec> resolve_view(const CognitionHandle& handle,
+                                                              const std::string& viewId,
+                                                              ResolveDiagnostic* diag = nullptr);
 
     // the bundle: floors and protected constraints survive any budget; the
     // budget shrinks candidates only, with omissions explained
-    [[nodiscard]] static ContextBundle BuildBundle(const CognitionHandle& handle,
-                                                   const Query& query);
+    [[nodiscard]] static ContextBundle build_bundle(const CognitionHandle& handle,
+                                                    const Query& query);
 
     // two renderings of one result; neither audience scrapes the other
     [[nodiscard]] static std::string RenderBundle(const ContextBundle& bundle, OutputView view);

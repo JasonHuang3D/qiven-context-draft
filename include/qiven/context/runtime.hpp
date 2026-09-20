@@ -120,7 +120,7 @@ struct LLM
 {
     std::string name;           // value: intrinsic identity ("GPT5")
     TurnBudget turnBudget;      // session economics (DR-012)
-    CognitionHandle pCognition; // lifetime pinned per Work cycle;
+    CognitionHandle pCognition; // lifetime pinned per work cycle;
                                 // const: cognition is not mutable
                                 // through participants (DR-001)
     // draft hooks — production replaces with real reasoning + tool runtime
@@ -131,15 +131,15 @@ struct LLM
     std::vector<ContextTransaction> parkedDeltas; // refused-but-held deltas
                                                   // (StaleBase recovery only)
 
-    // one causal Work cycle — the numbered order is normative:
+    // one causal work cycle — the numbered order is normative:
     // acquire grant -> read -> think -> propose -> gated write ->
     // recovery-table next action (DR-002: the model never chooses its own
     // recovery; the policy table in cognition does)
-    void Work(const std::string& prompt, const AuthenticatedActor& actor, std::string& result,
+    void work(const std::string& prompt, const AuthenticatedActor& actor, std::string& result,
               WorkMode mode = WorkMode::SupervisedForeground);
 
 private:
-    // the causal body; Work() wraps this and guarantees annotate_budget on
+    // the causal body; work() wraps this and guarantees annotate_budget on
     // every completed turn (DR-012: the budget invariant covers ALL paths)
     void work_impl(const std::string& prompt, const AuthenticatedActor& actor,
                    std::string& result, WorkMode mode,
@@ -159,18 +159,18 @@ struct LLMClientTool // the relay; NO cognition access (R5)
     ParticipantBinding binding;            // current runtime binding (rebindable)
     bool operational { true };
 
-    bool ControlLLMFromHuman(const AuthenticatedActor& actor, const std::string& prompt,
-                             std::string& result)
+    bool control_llm_from_human(const AuthenticatedActor& actor, const std::string& prompt,
+                                std::string& result)
     {
-        pCurrentLLM->Work(prompt, actor, result);
-        WaitForLLM();                   // async: dispatch != completion (v5 lesson)
-        return CollectFeedBack(result); // relay itself is fallible (UI-send incident)
+        pCurrentLLM->work(prompt, actor, result);
+        wait_for_llm();                  // async: dispatch != completion (v5 lesson)
+        return collect_feedback(result); // relay itself is fallible (UI-send incident)
     }
 
-    static void WaitForLLM()
+    static void wait_for_llm()
     {
     } // draft: synchronous stand-in
-    bool CollectFeedBack(const std::string& result)
+    bool collect_feedback(const std::string& result)
     {
         lastFeedback = result; // human consumes RESULTS, never raw context
         return true;           // draft: relay succeeds; production surfaces
@@ -185,8 +185,8 @@ struct Human // all-value, zero pointers — the most
     std::string verifiedPrincipal; // session-injected identity, verified against
                                    // governance rootPrincipal at the port (R4)
 
-    bool UseLLMToWork(const std::shared_ptr<LLMClientTool>& pClient, const std::string& prompt,
-                      std::string& result) const
+    bool use_llm_to_work(const std::shared_ptr<LLMClientTool>& pClient, const std::string& prompt,
+                         std::string& result) const
     {
         // the actor's identity comes from the human's verified principal; the
         // role/binding/serving disclosure come from the client-tool binding
@@ -195,7 +195,7 @@ struct Human // all-value, zero pointers — the most
         AuthenticatedActor actor { verifiedPrincipal, pClient->binding.role,
                                    pClient->binding.modelId, pClient->pCurrentLLM->name,
                                    "standard" };
-        return pClient->ControlLLMFromHuman(actor, prompt, result);
+        return pClient->control_llm_from_human(actor, prompt, result);
     }
 };
 } // namespace qiven::context
