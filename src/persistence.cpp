@@ -24,7 +24,7 @@ namespace qiven::context
 {
 namespace
 {
-constexpr std::uint8_t serialization_version_limit = 7;      // 7: invocation policy (v4.3); 6: roles + layer
+constexpr std::uint8_t serialization_version_limit = 8;      // 8: policy presence + claim/boundary (V4S); 7: policy rules; 6: roles + layer
 constexpr std::uint32_t max_serialized_records     = 100000; // resource-abuse guard (DR-009)
 
 // --- little-endian TLV writers (fixed field order, versioned) ----------------
@@ -319,11 +319,18 @@ Bytes serializeImpl(const Snapshot& snapshot)
     // DR-017: the canonical role registry is cognition data; exports carry it
     // v4.3: the invocation policy travels with the snapshot (activation is
     // cognition data; a restored generation derives identical preparation)
+    putU8(bytes, snapshot.invocation.present ? 1 : 0); // v8: World A vs B (S1-05)
     putU32(bytes, static_cast<std::uint32_t>(snapshot.invocation.rules.size()));
     for (const auto& rule : snapshot.invocation.rules)
     {
         putU8(bytes, static_cast<std::uint8_t>(rule.action));
+        putU8(bytes, rule.claimClass.has_value() ? 1 : 0);
+        if (rule.claimClass.has_value())
+        {
+            putU8(bytes, static_cast<std::uint8_t>(*rule.claimClass));
+        }
         putU8(bytes, static_cast<std::uint8_t>(rule.requirement));
+        putU8(bytes, static_cast<std::uint8_t>(rule.boundary));
         putStr(bytes, rule.subject);
         putU8(bytes, rule.blocking ? 1 : 0);
     }
@@ -363,8 +370,10 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
     Reader reader { bytes };
 
     const auto version = reader.u8("serialization version");
-    if (reader.ok() && version != serialization_version_limit)
+    if (reader.ok() && (version > serialization_version_limit || version < 6))
     {
+        // newer than this binary, or older than the maintained window: refuse
+        // (fail-closed; v6 is the oldest faithful-restore format, V4S §30)
         reader.error = DeserializeError { DeserializeError::Kind::BadVersion, 0, "version" };
     }
 
@@ -552,7 +561,7 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
             profile.id      = reader.str("profile id");
             profile.kind    = reader.str("profile kind");
             profile.summary = reader.str("profile summary");
-            profile.layer   = reader.enumValue<WorkflowLayer>("profile layer", 3);
+            profile.layer   = reader.enumValue<WorkflowLayer>("profile layer", 3); // v6+
             if (!reader.ok())
             {
                 break;
@@ -580,26 +589,61 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
         }
     }
 
-    if (reader.ok())
+    if (reader.ok() && version >= 7)
     {
+        if (version >= 8)
+        {
+            snapshot.invocation.present = reader.u8("invocation present") != 0;
+        }
         const auto ruleCount = reader.cappedCount("invocation rules");
         snapshot.invocation.rules.reserve(ruleCount);
         for (std::uint32_t i = 0; reader.ok() && i < ruleCount; ++i)
         {
             InvocationRule rule;
-            rule.action      = reader.enumValue<ActionKind>("rule action", 13);
-            rule.requirement = reader.enumValue<RequirementKind>("rule requirement", 8);
+            rule.action = reader.enumValue<ActionKind>("rule action", 13);
             if (!reader.ok())
             {
                 break;
+            }
+            if (version >= 8)
+            {
+                if (reader.u8("rule claim present") != 0)
+                {
+                    rule.claimClass = reader.enumValue<ClaimClass>("rule claim class", 4);
+                }
+                rule.requirement = reader.enumValue<RequirementKind>("rule requirement", 8);
+                rule.boundary    = reader.enumValue<RequirementBoundary>("rule boundary", 1);
+                if (!reader.ok())
+                {
+                    break;
+                }
+            }
+            else
+            {
+                rule.requirement = reader.enumValue<RequirementKind>("rule requirement", 8);
+                if (!reader.ok())
+                {
+                    break;
+                }
             }
             rule.subject  = reader.str("rule subject");
             rule.blocking = reader.u8("rule blocking") != 0;
             snapshot.invocation.rules.push_back(std::move(rule));
         }
+        if (version == 7)
+        {
+            // v7 carried no presence byte: an empty rule set cannot prove the
+            // World-B intent, so it conservatively restores as policy-absent
+            snapshot.invocation.present = !snapshot.invocation.rules.empty();
+        }
+    }
+    else if (reader.ok())
+    {
+        snapshot.invocation.present = false; // v6: policy did not exist (§30:
+                                             // deserialization is not migration)
     }
 
-    if (reader.ok())
+    if (reader.ok()) // roles + profile layer exist since v6 (minimum window)
     {
         const auto roleCount = reader.cappedCount("role count");
         snapshot.roles.reserve(roleCount);
@@ -719,6 +763,7 @@ Snapshot makeGenesis()
     genesis.governance.rootPrincipal = "github:JasonHuang3D";
     genesis.constitution             = makeConstitution();
     genesis.policy                   = makeDefaultPolicy();
+    genesis.invocation               = default_invocation_policy(); // S0-01
     genesis.state.objective          = "qiven-context continuity and kernel design";
     genesis.state.candidateRef       = "not-created";
     return genesis;

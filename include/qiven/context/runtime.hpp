@@ -127,193 +127,113 @@ struct CognitiveRequirement // a derived, action-scoped requirement
     bool blocking { true };
 };
 
+enum class RequirementStatus // V4S-02: derivation and satisfaction are
+{                            // SEPARATE concepts (S0-03). A requirement that
+    Pending,                 // is merely LISTED is not satisfied.
+    Satisfied,               // an explicit resolver produced evidence
+    Failed,                  // resolution was attempted and failed (blocking)
+};
+
+struct PreparedRequirement // one derived requirement with its lifecycle
+{
+    CognitiveRequirement requirement;
+    RequirementBoundary boundary { RequirementBoundary::BeforeJudgment };
+    RequirementStatus status { RequirementStatus::Pending };
+    std::vector<std::string> evidence; // what satisfied it (reference state:
+                                       // caller-constructed evidence proves
+                                       // SEMANTICS here, not trust provenance)
+};
+
+// Reference-state satisfaction marker for tests and future resolvers. The
+// stabilization deliberately does NOT define who may mint trustworthy
+// satisfaction - that is Runtime ADL territory (plan sec 25).
+inline void mark_satisfied(PreparedRequirement& prepared, std::string evidence)
+{
+    prepared.status = RequirementStatus::Satisfied;
+    prepared.evidence.push_back(std::move(evidence));
+}
+
+enum class PreparationFailure // S0-02: absence must be a TYPED failure, never
+{                             // an implicit "no requirements" fail-open state
+    None,
+    InvocationPolicyMissing, // World A: policy absent/unavailable -> fail closed
+    RequiredRecallMissing,   // a blocking recall failed to resolve
+};
+
 struct PreparationPacket // seed §20: the bridge back into Judgment. Content
 {                        // is selected by POLICY OBLIGATIONS attached to the
                          // action, not by similarity alone (§21).
     ActionIntent intent;
-    std::vector<CognitiveRequirement> requirements; // all derived demands
-    std::vector<std::string> mandatoryContext;      // resolved cognition
-    std::vector<std::string> knownPits;             // resolved pit records
-    std::vector<std::string> liveFacts;             // filled by live ports
-    std::vector<CognitiveRequirement> unresolved;   // blocking recall failures
+    std::vector<CognitiveNeed> discretionaryNeeds;           // S1-02: participant-requested
+                                                             // epistemic assistance, kept visible;
+                                                             // it can never WAIVE a mandate
+    std::vector<PreparedRequirement> requirements;           // derived demands + lifecycle
+    std::vector<std::string> mandatoryContext;               // resolved cognition
+    std::vector<std::string> knownPits;                      // resolved pit records
+    std::vector<std::string> liveFacts;                      // filled by live ports
+    PreparationFailure failure { PreparationFailure::None }; // S0-02
 
-    [[nodiscard]] bool ready() const
+    // S0-03: the single ambiguous ready() is REPLACED by two explicit
+    // questions. Listed is never satisfied; blocking Pending/Failed gates.
+    [[nodiscard]] bool ready_for_judgment() const
     {
-        return unresolved.empty();
+        if (failure != PreparationFailure::None)
+        {
+            return false;
+        }
+        for (const auto& prepared : requirements)
+        {
+            if (prepared.requirement.blocking &&
+                prepared.boundary == RequirementBoundary::BeforeJudgment &&
+                prepared.status != RequirementStatus::Satisfied)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] bool ready_for_execution() const
+    {
+        if (failure != PreparationFailure::None)
+        {
+            return false;
+        }
+        for (const auto& prepared : requirements)
+        {
+            if (prepared.requirement.blocking &&
+                prepared.status != RequirementStatus::Satisfied)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 };
 
 // Derive the control-plane demands for an intent from the snapshot's
 // invocation policy. Pure: same snapshot + intent => same requirements.
-[[nodiscard]] inline std::vector<CognitiveRequirement> derive_requirements(
+[[nodiscard]] inline std::vector<PreparedRequirement> derive_requirements(
     const Snapshot& snapshot, const ActionIntent& intent)
 {
-    std::vector<CognitiveRequirement> out;
+    std::vector<PreparedRequirement> out;
     for (const auto& rule : snapshot.invocation.rules)
     {
-        if (rule.action == intent.kind)
+        // S1-01: the claim axis MATERIALLY participates - a claim-scoped
+        // rule applies only when both action and claim class match; an
+        // unscoped rule applies to every claim class of that action.
+        const bool claimMatches = !rule.claimClass.has_value() ||
+                                  *rule.claimClass == intent.claimClass;
+        if (rule.action == intent.kind && claimMatches)
         {
-            out.push_back(CognitiveRequirement { rule.requirement, rule.subject,
-                                                 rule.blocking });
+            out.push_back(PreparedRequirement {
+                CognitiveRequirement { rule.requirement, rule.subject, rule.blocking },
+                rule.boundary,
+                RequirementStatus::Pending,
+                {} });
         }
     }
     return out;
-}
-
-// Build the preparation packet: recall-class requirements resolve against
-// the snapshot (memory titles / profile ids as retrieval keys, v1); action-
-// class requirements (verify-live, run-check, ask-human...) are listed as
-// demands whose satisfaction is execution-time, outside this pure builder.
-// A blocking recall that finds nothing lands in `unresolved` - the action
-// may not proceed (seed §28 step 7).
-[[nodiscard]] inline PreparationPacket build_preparation_packet(
-    const Snapshot& snapshot, const ActionIntent& intent)
-{
-    PreparationPacket packet;
-    packet.intent       = intent;
-    packet.requirements = derive_requirements(snapshot, intent);
-    for (const auto& requirement : packet.requirements)
-    {
-        const bool recallClass = requirement.kind == RequirementKind::MandatoryRecall ||
-                                 requirement.kind == RequirementKind::VerifyCanonical ||
-                                 requirement.kind == RequirementKind::InspectKnownPit;
-        if (!recallClass)
-        {
-            continue; // an action-class demand: listed, satisfied at execution
-        }
-        bool resolved = false;
-        for (const auto& record : snapshot.memory)
-        {
-            if (record.title.find(requirement.subject) != std::string::npos ||
-                record.statement.find(requirement.subject) != std::string::npos)
-            {
-                packet.mandatoryContext.push_back(record.title + ": " + record.statement);
-                resolved = true;
-            }
-        }
-        for (const auto& profile : snapshot.profiles)
-        {
-            if (profile.id.find(requirement.subject) != std::string::npos)
-            {
-                packet.mandatoryContext.push_back(profile.id + ": " + profile.summary);
-                resolved = true;
-            }
-        }
-        if (!resolved && requirement.blocking)
-        {
-            packet.unresolved.push_back(requirement);
-        }
-    }
-    return packet;
-}
-
-// --- v4.4 / A6: tool invocation is mechanism-owned when a contract exists
-// (seed §17): participants express intent; the declared argv contract
-// constructs and validates the concrete invocation. Guessing syntax where
-// a contract exists is the A6 failure class (the CLI-retry odyssey).
-
-struct ToolContract // the declared, machine-readable argv contract
-{
-    std::string tool;                      // "qiven"
-    std::string operation;                 // "gate"
-    std::vector<std::string> argvTemplate; // fixed words and {placeholders}:
-                                           // e.g. {"{python}", "tools/qiven.py",
-                                           //  "{operation}", "{subject}"}
-    std::vector<std::string> allowedFlags; // "--json", "--verbose", ...
-};
-
-[[nodiscard]] inline bool is_placeholder(const std::string& word)
-{
-    return word.size() >= 2 && word.front() == '{' && word.back() == '}';
-}
-
-// Construct the invocation from the contract, never from memory: template
-// fixed words are kept verbatim; {operation}/{tool}/{subject} substitute
-// from the intent; trailing allowed flags pass through in order.
-[[nodiscard]] inline std::vector<std::string> construct_invocation(
-    const ToolContract& contract, const ActionIntent& intent)
-{
-    std::vector<std::string> argv;
-    for (const auto& word : contract.argvTemplate)
-    {
-        if (word == "{operation}")
-        {
-            argv.push_back(intent.operation.empty() ? contract.operation : intent.operation);
-        }
-        else if (word == "{tool}")
-        {
-            argv.push_back(intent.tool.empty() ? contract.tool : intent.tool);
-        }
-        else if (word == "{subject}")
-        {
-            argv.push_back(intent.concepts.empty() ? std::string {} : intent.concepts.front());
-        }
-        else
-        {
-            argv.push_back(word);
-        }
-    }
-    return argv;
-}
-
-// Validate an argv AGAINST the contract: same arity, fixed positions
-// verbatim, placeholder positions non-empty. A guessed variant (the A6
-// failure class) differs in a fixed position or arity and fails here.
-[[nodiscard]] inline bool validate_invocation(const ToolContract& contract,
-                                              const std::vector<std::string>& argv)
-{
-    if (argv.size() != contract.argvTemplate.size())
-    {
-        return false;
-    }
-    for (std::size_t i = 0; i < argv.size(); ++i)
-    {
-        const std::string& word = contract.argvTemplate[i];
-        if (is_placeholder(word))
-        {
-            if (argv[i].empty())
-            {
-                return false;
-            }
-        }
-        else if (argv[i] != word)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-// --- v4.5 / A8: lower-layer reuse is checked before primitive creation
-// (seed §16): the search itself is an EXECUTION-TIME mechanism (filesystem,
-// dependency graph, symbol index live outside cognition); the control
-// plane owns the boundary - the search is mandatory, the report must
-// exist before judgment, and uninformed duplication is refused.
-
-struct LowerLayerHit // one existing implementation the search surfaced
-{
-    std::string repo;    // "qiven-foundation"
-    std::string symbol;  // "qiven::fnv1a64"
-    std::string summary; // what it provides
-};
-
-struct ExistingImplementationReport // the evidence judgment receives
-{
-    bool searched { false };         // the mechanism actually ran
-    std::vector<LowerLayerHit> hits; // what already exists
-};
-
-// Authorization to proceed to JUDGMENT on a reusable primitive: the search
-// must have run. Hits do NOT decide reuse - they inform it (the aim is to
-// prohibit uninformed duplication, not new implementation: seed §16).
-[[nodiscard]] inline bool primitive_judgment_authorized(const ActionIntent& intent,
-                                                        const ExistingImplementationReport& report)
-{
-    if (intent.kind != ActionKind::IntroducePrimitive)
-    {
-        return true; // not this boundary
-    }
-    return report.searched;
 }
 
 // --- v4.4 / A7: failure is an invocation trigger (seed §18/§19) ----------
@@ -400,13 +320,230 @@ struct ExistingImplementationReport // the evidence judgment receives
     return out;
 }
 
+// Build the preparation packet: recall-class requirements resolve against
+// the snapshot (memory titles / profile ids as retrieval keys, v1); action-
+// class requirements (verify-live, run-check, ask-human...) are listed as
+// demands whose satisfaction is execution-time, outside this pure builder.
+// A blocking recall that finds nothing lands in `unresolved` - the action
+// may not proceed (seed §28 step 7).
+[[nodiscard]] inline PreparationPacket build_preparation_packet(
+    const Snapshot& snapshot, const ActionIntent& intent,
+    const std::vector<CognitiveNeed>& discretionaryNeeds = {})
+{
+    PreparationPacket packet;
+    packet.intent             = intent;
+    packet.discretionaryNeeds = discretionaryNeeds; // carried, never enforced
+    if (!snapshot.invocation.present)
+    {
+        // S0-02: an absent policy is NOT the statement "no requirements
+        // exist". For governed v4 actions, control fails closed here.
+        packet.failure = PreparationFailure::InvocationPolicyMissing;
+        return packet;
+    }
+    packet.requirements = derive_requirements(snapshot, intent);
+    // V4S-03 resolver semantics (plan sec 9):
+    // - MandatoryRecall auto-resolves by EXACT key (title == subject or
+    //   profile.id == subject); incidental prose similarity must never
+    //   satisfy a blocking requirement (S0-04 error C).
+    // - InspectKnownPit resolves ONLY through the FailureFingerprint path
+    //   (S0-04 error B): priorFailure -> find_related_records -> knownPits;
+    //   missing fingerprint or no hits on a blocking rule = Failed (9.3).
+    // - VerifyCanonical is NOT generic memory lookup (S0-04 error A): it
+    //   stays Pending until an explicit canonical resolver exists (ADL).
+    for (auto& prepared : packet.requirements)
+    {
+        const CognitiveRequirement& requirement = prepared.requirement;
+        if (requirement.kind == RequirementKind::MandatoryRecall)
+        {
+            for (const auto& record : snapshot.memory)
+            {
+                if (record.title == requirement.subject)
+                {
+                    packet.mandatoryContext.push_back(record.title + ": " + record.statement);
+                    prepared.evidence.push_back(record.title);
+                }
+            }
+            for (const auto& profile : snapshot.profiles)
+            {
+                if (profile.id == requirement.subject)
+                {
+                    packet.mandatoryContext.push_back(profile.id + ": " + profile.summary);
+                    prepared.evidence.push_back(profile.id);
+                }
+            }
+            if (!prepared.evidence.empty())
+            {
+                prepared.status = RequirementStatus::Satisfied;
+            }
+            else if (requirement.blocking)
+            {
+                prepared.status = RequirementStatus::Failed;
+                if (packet.failure == PreparationFailure::None)
+                {
+                    packet.failure = PreparationFailure::RequiredRecallMissing;
+                }
+            }
+        }
+        else if (requirement.kind == RequirementKind::InspectKnownPit)
+        {
+            if (intent.priorFailure.has_value())
+            {
+                for (const auto& entry : find_related_records(snapshot, *intent.priorFailure))
+                {
+                    packet.knownPits.push_back(entry);
+                    prepared.evidence.push_back(entry);
+                }
+                if (!prepared.evidence.empty())
+                {
+                    prepared.status = RequirementStatus::Satisfied;
+                }
+            }
+            if (prepared.status != RequirementStatus::Satisfied && requirement.blocking)
+            {
+                prepared.status = RequirementStatus::Failed;
+                if (packet.failure == PreparationFailure::None)
+                {
+                    packet.failure = PreparationFailure::RequiredRecallMissing;
+                }
+            }
+        }
+        // VerifyCanonical / VerifyLive / SearchLowerLayer / InspectToolContract /
+        // RunMechanicalCheck / RequestReview / AskHuman stay Pending: their
+        // satisfaction is execution-time mechanism (Runtime ADL owns those).
+    }
+    return packet;
+}
+
+// --- v4.4 / A6: tool invocation is mechanism-owned when a contract exists
+// (seed §17): participants express intent; the declared argv contract
+// constructs and validates the concrete invocation. Guessing syntax where
+// a contract exists is the A6 failure class (the CLI-retry odyssey).
+
+struct ToolContract // the declared, machine-readable argv contract.
+                    // V4S-05 (S1-04): a FIXED argv template only - this
+                    // reference contract implements no flag semantics, and no
+                    // field may advertise behavior the miniature does not
+                    // implement. Production argv schemas belong to ADL.
+{
+    std::string tool;                      // "qiven"
+    std::string operation;                 // "gate"
+    std::vector<std::string> argvTemplate; // fixed words and {placeholders}:
+                                           // e.g. {"python", "tools/qiven.py",
+                                           //  "{operation}", "{subject}"}
+};
+
+[[nodiscard]] inline bool is_placeholder(const std::string& word)
+{
+    return word.size() >= 2 && word.front() == '{' && word.back() == '}';
+}
+
+// Construct the invocation from the contract, never from memory: template
+// fixed words are kept verbatim; {operation}/{tool}/{subject} substitute
+// from the intent; trailing allowed flags pass through in order.
+[[nodiscard]] inline std::vector<std::string> construct_invocation(
+    const ToolContract& contract, const ActionIntent& intent)
+{
+    std::vector<std::string> argv;
+    for (const auto& word : contract.argvTemplate)
+    {
+        if (word == "{operation}")
+        {
+            argv.push_back(intent.operation.empty() ? contract.operation : intent.operation);
+        }
+        else if (word == "{tool}")
+        {
+            argv.push_back(intent.tool.empty() ? contract.tool : intent.tool);
+        }
+        else if (word == "{subject}")
+        {
+            argv.push_back(intent.concepts.empty() ? std::string {} : intent.concepts.front());
+        }
+        else
+        {
+            argv.push_back(word);
+        }
+    }
+    return argv;
+}
+
+// Validate an argv AGAINST the contract: same arity, fixed positions
+// verbatim, placeholder positions non-empty. A guessed variant (the A6
+// failure class) differs in a fixed position or arity and fails here.
+[[nodiscard]] inline bool validate_invocation(const ToolContract& contract,
+                                              const std::vector<std::string>& argv)
+{
+    if (argv.size() != contract.argvTemplate.size())
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < argv.size(); ++i)
+    {
+        const std::string& word = contract.argvTemplate[i];
+        if (is_placeholder(word))
+        {
+            if (argv[i].empty())
+            {
+                return false;
+            }
+        }
+        else if (argv[i] != word)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// --- v4.5 / A8: lower-layer reuse is checked before primitive creation
+// (seed §16): the search itself is an EXECUTION-TIME mechanism (filesystem,
+// dependency graph, symbol index live outside cognition); the control
+// plane owns the boundary - the search is mandatory, the report must
+// exist before judgment, and uninformed duplication is refused.
+
+struct LowerLayerHit // one existing implementation the search surfaced
+{
+    std::string repo;    // "qiven-foundation"
+    std::string symbol;  // "qiven::fnv1a64"
+    std::string summary; // what it provides
+};
+
+struct ExistingImplementationReport // the evidence judgment receives
+{
+    bool searched { false };         // the mechanism actually ran
+    std::vector<LowerLayerHit> hits; // what already exists
+};
+
+// V4S-05 (S1-03): proves the REFERENCE STATE represents a completed
+// search - NOT who performed it. Caller-constructed proof state is
+// acceptable only because this repository proves semantics, not trust
+// provenance; trustworthy search receipts are Runtime ADL territory.
+// Proceed-to-JUDGMENT precondition on a reusable primitive: the search
+// must have run. Hits do NOT decide reuse - they inform it (the aim is to
+// prohibit uninformed duplication, not new implementation: seed §16).
+[[nodiscard]] inline bool primitive_judgment_precondition_met(const ActionIntent& intent,
+                                                              const ExistingImplementationReport& report)
+{
+    if (intent.kind != ActionKind::IntroducePrimitive)
+    {
+        return true; // not this boundary
+    }
+    return report.searched;
+}
+
+// V4S-05 (S1-03): RetryEvidenceState is REFERENCE STATE, not a production
+// evidence capability - it asserts nothing about who observed the evidence.
+struct RetryEvidenceState
+{
+    bool hasNewEvidence { false };
+};
+
 // The retry rule (V4-R3): an equivalent retry — same tool+operation, same
 // normalized failure signature — is permitted ONLY with new evidence.
 [[nodiscard]] inline bool retry_permitted(const FailureFingerprint& prior,
                                           const ActionIntent& candidate,
-                                          bool evidenceAdded)
+                                          const RetryEvidenceState& evidence)
 {
-    if (evidenceAdded)
+    if (evidence.hasNewEvidence)
     {
         return true;
     }

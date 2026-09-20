@@ -16,6 +16,7 @@
 // ============================================================================
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -306,10 +307,19 @@ enum class RequirementKind // what Cognitive Control demands before the
     AskHuman,              // H1/H3/H4 class boundaries
 };
 
+enum class RequirementBoundary // WHEN the requirement must be satisfied
+{                              // (V4S-02: derivation vs satisfaction split)
+    BeforeJudgment,            // the packet must satisfy it before Judgment deliberates
+    BeforeExecution,           // it may be satisfied later, but never past execution
+};
+
 struct InvocationRule // one policy row: WHEN this action crosses the control
 {                     // plane, THESE requirements are mandatory (seed §8)
     ActionKind action { ActionKind::BeginTask };
+    std::optional<ClaimClass> claimClass; // absent = every claim class (S1-01:
+                                          // the claim axis must MATRIALLY match)
     RequirementKind requirement { RequirementKind::MandatoryRecall };
+    RequirementBoundary boundary { RequirementBoundary::BeforeJudgment };
     std::string subject; // retrieval key / check name, e.g. "naming policy"
     bool blocking { true };
 };
@@ -317,7 +327,14 @@ struct InvocationRule // one policy row: WHEN this action crosses the control
 struct InvocationPolicy // cognition data (PolicyTable-adjacent): the
 {                       // activation half of the authority table; derives
                         // from ACCEPTED judgments - default_invocation_policy()
-                        // is the compiled scar backlog (P-51/52/53 as data)
+                        // is the compiled scar backlog (P-51/52/53 as data).
+                        // `present` separates World A from World B (S1-05):
+                        // absent policy (fail closed) is NOT the same state as
+                        // a present policy with zero applicable rules (a valid
+                        // policy decision). Binary defaults are BOOTSTRAP ONLY
+                        // (S1-06): a loaded snapshot's policy is authoritative
+                        // and is never silently merged or replaced.
+    bool present { false };
     std::vector<InvocationRule> rules;
 };
 
@@ -487,31 +504,44 @@ struct Snapshot // PURE VALUE TREE — zero pointers, ever (R1); assignable,
 // as invocation rules the control plane enforces at action boundaries.
 [[nodiscard]] inline InvocationPolicy default_invocation_policy()
 {
+    using B = RequirementBoundary;
     return {
+        true, // present: bootstrap seed for a genuinely new chain (S0-01)
         {
-            { ActionKind::Commit, RequirementKind::RunMechanicalCheck,
-              "attribution subject-position lint (P-51)", true },
-            { ActionKind::Publish, RequirementKind::RunMechanicalCheck,
-              "full default gate PASS receipt at exact head (P-53)", true },
-            { ActionKind::Publish, RequirementKind::RequestReview,
-              "H2 exact-delta review", true },
-            { ActionKind::CreateCppSymbol, RequirementKind::MandatoryRecall,
+            { ActionKind::CreateCppSymbol, std::nullopt,
+              RequirementKind::MandatoryRecall, B::BeforeJudgment,
               "naming policy", true },
-            { ActionKind::IntroducePrimitive, RequirementKind::SearchLowerLayer,
+            { ActionKind::IntroducePrimitive, std::nullopt,
+              RequirementKind::SearchLowerLayer, B::BeforeJudgment,
               "eligible lower layers", true },
-            { ActionKind::InvokeTool, RequirementKind::InspectToolContract,
+            { ActionKind::InvokeTool, std::nullopt,
+              RequirementKind::InspectToolContract, B::BeforeExecution,
               "declared tool argv contract", true },
-            { ActionKind::RetryFailure, RequirementKind::InspectKnownPit,
-              "failure fingerprint related pits", true },
-            { ActionKind::MakeCanonicalClaim, RequirementKind::VerifyCanonical,
+            { ActionKind::RetryFailure, std::nullopt,
+              RequirementKind::InspectKnownPit, B::BeforeJudgment,
+              "failure fingerprint", true },
+            { ActionKind::MakeCanonicalClaim, std::nullopt,
+              RequirementKind::VerifyCanonical, B::BeforeJudgment,
               "canonical record", true },
-            { ActionKind::MakeLiveClaim, RequirementKind::VerifyLive,
+            { ActionKind::MakeLiveClaim, std::nullopt,
+              RequirementKind::VerifyLive, B::BeforeJudgment,
               "live source", true },
-            { ActionKind::ModifyReferencedContract, RequirementKind::MandatoryRecall,
+            { ActionKind::ModifyReferencedContract, std::nullopt,
+              RequirementKind::MandatoryRecall, B::BeforeJudgment,
               "reference integrity sweep (P-52)", true },
-            { ActionKind::AcceptCandidate, RequirementKind::RequestReview,
+            { ActionKind::Commit, std::nullopt,
+              RequirementKind::RunMechanicalCheck, B::BeforeExecution,
+              "attribution subject-position lint (P-51)", true },
+            { ActionKind::Publish, std::nullopt,
+              RequirementKind::RunMechanicalCheck, B::BeforeExecution,
+              "full default gate PASS receipt at exact head (P-53)", true },
+            { ActionKind::Publish, std::nullopt,
+              RequirementKind::RequestReview, B::BeforeExecution,
+              "H2 exact-delta review", true },
+            { ActionKind::AcceptCandidate, std::nullopt,
+              RequirementKind::RequestReview, B::BeforeExecution,
               "content-bound H2 evidence", true },
-        }
+        },
     };
 }
 

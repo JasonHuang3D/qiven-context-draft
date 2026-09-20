@@ -116,3 +116,29 @@ K5's transport design.
 - The hidden interior of reasoning stays opaque; v4 types only the
   boundaries (seed §23) — any proposal that types thought interiors is
   rejected at design review, not implemented.
+
+---
+
+## Post-closeout stabilization (V4S) ✅ 2026-09-21
+
+Not a v4.7 feature phase: a post-closeout semantic-consistency repair before
+Runtime ADL, per the owner-authored `v4-stabilization-plan.md`. All S0/S1
+findings closed, all S2/S3 findings truthfully represented:
+
+- V4S-01 `f8eb503` — S0-01/S0-02/S1-05/S1-06: genesis seeds the default
+  policy; absent policy is a typed fail-closed state distinct from a valid
+  empty rule set; v6/v7 snapshots restore faithfully with NO silent policy
+  synthesis; serialization v8.
+- V4S-02 `66834f7` — S0-03: requirement lifecycle (Pending/Satisfied/Failed
+  × BeforeJudgment/BeforeExecution); `ready()` removed; readiness split into
+  `ready_for_judgment()` / `ready_for_execution()`; listed ≠ satisfied.
+- V4S-03 `f9a8707` — S0-04: exact-key MandatoryRecall; InspectKnownPit
+  connected to the FailureFingerprint path; VerifyCanonical no longer a
+  generic memory lookup.
+- V4S-04 `f806de1` — S1-01/S1-02: claim-scoped rules materially match;
+  CognitiveNeed rides in the packet and can never waive a mandate.
+- V4S-05 `f3f37df` — S1-03/S1-04: reference-state honesty renames;
+  `allowedFlags` false advertising removed.
+
+Freeze rule (plan sec 35) applies from the accepted V4S head: Runtime ADL
+may replace mechanisms but not the semantic obligations they preserve.

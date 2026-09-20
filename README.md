@@ -6,11 +6,15 @@ always produces mutual interpretive drift, while pointer/value choices, types an
 call graphs state ownership, lifetime and causality exactly. Here, architecture
 rules compile.
 
-**Status: draft, v3 phase 2C (semantic closure).** This is not the production
-context engine (roadmap order 2). It is the design substrate that the K4/K5
-continuity work and the future kernel are judged against. Architecture docs:
-`docs/architecture/` (requirements, cognition model, process model, decisions,
-pit regression map, invariant inventory, validation profile).
+**Status: executable specification through v4.6, post-closeout v4
+stabilization (V4S) complete.** v3 persistence/authority and v4
+cognition-activation semantics are accepted design material. This repository
+is still a specification/reference implementation, NOT the production Context
+runtime: the runnable cognition_loop demonstrates the v3 causal loop; v4
+Cognitive Control has executable semantic proofs but is not yet wired into a
+production work/execution loop (Runtime ADL owns that integration, the real
+symbol index, the live verifier, and the production tool registry). The next
+boundary is Runtime ADL against the frozen v4 semantic contract.
 
 ## Why C++ as the bridge
 

@@ -98,6 +98,18 @@ faked as types:
    structured; depth is the reviewer's responsibility and the delegated-review
    escalation's subject.
 
+## 4b. v4 activation invariants (stabilized V4S, 2026-09-21)
+
+The v4 control-plane invariants are compiled and named in the pit ledger's
+v4/v4S rows rather than restated here: policy presence at genesis (P-54),
+typed fail-closed on absent policy vs valid empty rules (P-55), the
+derivation/satisfaction and boundary readiness splits (P-56), exact-key
+recall + fingerprint-only pit recall + explicit-resolver canonical
+verification (P-57), material claim matching (P-58), and
+advertise-only-implemented-behavior (P-59). Their executable proofs are
+`tests/control_plane.cpp`, `tests/tool_and_retry.cpp`, and the V4S
+assertions in `tests/persistence_fencing.cpp`.
+
 ## 5. Rule for future invariants
 
 New invariants enter this inventory with a class before implementation. A "C"

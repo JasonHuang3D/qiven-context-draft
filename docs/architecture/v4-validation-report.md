@@ -1,16 +1,22 @@
-# v4 Validation Report — Activation Proofs and the H1 Boundary
+# v4 Validation Report — FINAL CLOSEOUT
 
-**Status: candidate record.** Binds the v4 phases (v4.0-v4.5) to their
-compiled proofs per the seed's §41 obligations, names the delivery profile
-of each, and identifies exactly which obligations require the H1 boundary
-the standing window stops for. Draft commit identity: branch
-`jason-extended-cognition/v4-boundaries` @ `94ec522` (and merged v4.3 @
-`afd9d2d`); all gates + merge-proof PASS at exact heads.
+**Status: final (post-stabilization).** Binds the v4 feature closeout, the
+artifact-causal activation trial, and the post-closeout stabilization
+(V4S) into one record.
 
-Delivery profiles: **repo-semantics proofs** are remote-cold-boot profile
-(the draft repository and its compiled tests are the evidence); **the
-fresh-consumer activation trial** is artifact-handoff profile (K4-shaped:
-independent producer, isolated fresh consumer) and is the H1 boundary.
+- Feature closeout: v4.0-v4.6 on draft main lineage through `b15e41f`.
+- Canonical acceptance: `qiven-context` `evidence/audits/context-v4-activation-trial-2026-09-20.md`
+  (PASS with finding F1, fixed in canonical `6cd93db` lineage).
+- Stabilization closeout: this branch (V4S-01..07); exact head recorded by
+  the V4S-07 validation run below.
+- Distinction preserved: **compiled repo-semantics proofs** (bind to exact
+  draft heads) versus **artifact-causal activation proof** (the trial).
+- Post-stabilization deltas: S0-01..S1-06 remediations changed executable
+  semantics in the ways the stabilization plan prescribed (policy presence,
+  fail-closed control, readiness split, resolver closure, claim matching,
+  reference-state honesty); the re-validation is the V4S gate run at the
+  final exact head - every original v4.6 proof remains green under the new,
+  stricter semantics.
 
 ## The nine §41 obligations
 
@@ -48,3 +54,22 @@ rubric (evaluator role; the key never precedes the seal).
 The prepared kit (artifact path, digest, verbatim consumer prompt, relay
 instructions) is recorded in the v11 session checkpoint and the window's
 H1 kit file; the trial record lands in `evidence/audits/` on PASS.
+
+## V4S-07 — final stabilization validation record
+
+Validated exact head: `55a8fa9` (draft local gate PASS + merge-proof PASS,
+debug + release, 8/8 suites green). Verified per plan sec 33:
+
+- all original v4.6 proofs remain green under the stricter V4S semantics
+  (naming scenario, transport-stable activation, lower-layer interception,
+  tool-contract guess rejection, blind-retry refusal);
+- all new stabilization regressions green (genesis policy, World A/B,
+  legacy no-silent-synthesis, readiness split matrix, decoy recall,
+  fingerprint-connected pit recall, claim axis, needs-cannot-waive);
+- serialization golden intentionally re-pinned at v8
+  (`snap-aea527846a299800`); artifact corruption still fails closed;
+- pit traceability green (40 named tests, P-54..P-59 compiled).
+
+**v4 semantics freeze from this head.** Runtime ADL may replace mechanisms
+(string lookup, reference bool, fixed argv vector, in-memory miniature)
+but must preserve the semantic obligations (plan sec 35).

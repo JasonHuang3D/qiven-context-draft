@@ -119,6 +119,13 @@ unchanged; the trigger column is the v4 addition):
 | P-44 | ActionKind ModifyReferencedContract: version bump of a pinned contract (the A9 positive control — dependents caught by compiled tests in minutes, not rewrites) | pit.golden_vector_pinned; serialization roundtrip tests |
 | P-50 | ActionKind Publish: merge-class publication (delta identity + gate class at the same boundary; the gate-class half is backlog item 3) | morning-review checklist + audit record |
 
+| P-54 | InvocationPolicy existed in types/tests but real genesis booted without it - a v4 chain was born without its activation policy | V4S plan S0-01; V4S-01 | PROC | ActionKind BeginTask/genesis: makeGenesis seeds default_invocation_policy; loaded policy never replaced | genesis policy assertions in persistence_fencing | v4S |
+| P-55 | Missing control policy was DOCUMENTED fail-closed while executable behavior failed OPEN (empty derivation, ready()==true) | V4S plan S0-02/S1-05; control_plane World-A test | PROC | ActionKind any (governed): absent policy -> typed PreparationFailure, distinct from valid empty rule set | World-A + World-B tests in control_plane/persistence_fencing | v4S |
+| P-56 | PreparationPacket::ready() conflated LISTED requirements with SATISFIED ones - a Publish packet read ready with nothing satisfied | V4S plan S0-03; control_plane readiness matrix | PROC | ActionKind Publish/Commit: derivation vs satisfaction split; readiness split by boundary | readiness-matrix tests in control_plane | v4S |
+| P-57 | VerifyCanonical/InspectKnownPit routed through generic substring memory recall; prose similarity could satisfy blocking requirements | V4S plan S0-04; decoy tests | PROC | MandatoryRecall exact-key; InspectKnownPit via FailureFingerprint only; VerifyCanonical explicit-resolver-only | decoy + fingerprint-connection tests in control_plane | v4S |
+| P-58 | ClaimClass existed on ActionIntent but never affected policy matching - decorative data | V4S plan S1-01 | EPIST | claim-scoped InvocationRule matching (absent = all classes) | claim-axis test in control_plane | v4S |
+| P-59 | ToolContract.allowedFlags advertised flag pass-through the miniature never implemented - dead data with false comments | V4S plan S1-04 | PROC | ToolContract is a fixed argv template; advertise only implemented behavior | tool_and_retry contract tests | v4S |
+
 Backlog (inventory §5): tool-contract invocation routing (A6); failure-
 fingerprint batched evidence (A7); lower-layer search (A8). Merge-class
 full-gate proof (A5/P-53) compiled 2026-09-20.

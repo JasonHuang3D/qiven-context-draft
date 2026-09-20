@@ -7,6 +7,7 @@
 // ============================================================================
 
 #include <qiven/context/context.hpp>
+#include <qiven/context/runtime.hpp>
 
 #include "detail/check.hpp"
 
@@ -122,8 +123,112 @@ int main()
     // integrity digest and the storage revision, and they are different types
     std::printf("genesis digest: %s revision: %s\n", c1->digest.value.c_str(),
                 c1->revision.value.c_str());
-    QCD_CHECK(c1->digest == SnapshotDigest { "snap-70e3076be2f22d5f" }); // pit.golden_vector_pinned (v7 genesis format: + invocation policy)
+    QCD_CHECK(c1->digest == SnapshotDigest { "snap-aea527846a299800" }); // pit.golden_vector_pinned (v8 genesis: policy presence + seeded activation policy)
     QCD_CHECK(!IsEmpty(c1->revision));
+
+    // V4S-01 / S0-01: a real boot carries the v4 activation policy
+    QCD_CHECK(c1->state->invocation.present);
+    QCD_CHECK(!c1->state->invocation.rules.empty());
+    {
+        const InvocationRule* naming = nullptr;
+        for (const auto& rule : c1->state->invocation.rules)
+        {
+            if (rule.action == ActionKind::CreateCppSymbol)
+            {
+                naming = &rule;
+            }
+        }
+        QCD_CHECK(naming != nullptr); // pit.genesis_contains_default_invocation_policy
+        QCD_CHECK(naming->requirement == RequirementKind::MandatoryRecall);
+    }
+
+    // V4S-01 / S1-06 + pit.restored_policy_beats_compiled_default: an
+    // explicit snapshot policy survives restore EXACTLY - the binary's
+    // compiled default never replaces carried cognition
+    {
+        Snapshot custom           = *c1->state;
+        custom.invocation         = InvocationPolicy {};
+        custom.invocation.present = true;
+        InvocationRule only;
+        only.action      = ActionKind::EnterDomain;
+        only.requirement = RequirementKind::AskHuman;
+        only.subject     = "one custom row";
+        custom.invocation.rules.push_back(only);
+        const Bytes customBytes = serialize_snapshot(custom);
+        CognitionSource customSource;
+        customSource.kind           = CognitionSourceKind::HandoffArtifact;
+        customSource.inlineBytes    = customBytes;
+        customSource.expectedDigest = draft_content_id(customBytes);
+        const auto customRestored   = QivenContext::create_cognition(customSource);
+        QCD_CHECK(customRestored != nullptr);
+        QCD_CHECK(customRestored->state->invocation.present);
+        QCD_CHECK(customRestored->state->invocation.rules.size() == 1);
+        QCD_CHECK(customRestored->state->invocation.rules.front().subject == "one custom row");
+    }
+
+    // V4S-01 / pit.legacy_snapshot_does_not_gain_v4_policy_silently: a v6
+    // snapshot (pre-policy format) restores faithfully with policy ABSENT -
+    // deserialization is not migration (plan section 30)
+    {
+        Bytes legacy; // minimal valid v6: empty everything, one governor string
+        const auto pushU8l  = [&legacy](std::uint8_t v) { legacy.push_back(std::byte { v }); };
+        const auto pushU32l = [&legacy](std::uint32_t v) {
+            for (unsigned shift = 0; shift < 32; shift += 8)
+            {
+                legacy.push_back(std::byte { static_cast<std::uint8_t>((v >> shift) & 0xFFU) });
+            }
+        };
+        const auto pushStrl = [&](const char* s) {
+            const std::string value { s };
+            pushU32l(static_cast<std::uint32_t>(value.size()));
+            for (const char ch : value)
+            {
+                pushU8l(static_cast<std::uint8_t>(ch));
+            }
+        };
+        pushU8l(6);                // version
+        pushStrl("github:legacy"); // governance
+        pushU32l(0);               // constitution articles
+        pushU32l(0);               // handoff rows
+        pushU32l(0);               // recovery rows
+        pushStrl("");              // state.objective
+        pushStrl("");              // state.current
+        pushStrl("");              // state.checkpointRef
+        pushStrl("");              // state.candidateRef
+        pushStrl("");              // state.nextBoundaryRef
+        pushStrl("");              // state.repositories
+        pushStrl("");              // state.roadmap
+        pushU32l(0);               // decisions
+        pushU32l(0);               // memory
+        pushU32l(0);               // obligations
+        pushU32l(0);               // evidence
+        pushU32l(0);               // conflicts
+        pushU32l(0);               // profiles
+        pushU32l(0);               // views
+        pushU32l(0);               // roles
+        CognitionSource legacySource;
+        legacySource.kind           = CognitionSourceKind::HandoffArtifact;
+        legacySource.inlineBytes    = legacy;
+        legacySource.expectedDigest = draft_content_id(legacy);
+        DeserializeError legacyErr;
+        const auto legacyRestored = QivenContext::create_cognition(legacySource, &legacyErr);
+        if (legacyRestored == nullptr)
+        {
+            std::printf("legacy v6 boot failed: kind=%d offset=%zu detail=%s\n",
+                        static_cast<int>(legacyErr.kind), legacyErr.offset,
+                        legacyErr.detail.c_str());
+        }
+        QCD_CHECK(legacyRestored != nullptr);
+        QCD_CHECK(!legacyRestored->state->invocation.present); // faithful: absent
+        QCD_CHECK(legacyRestored->state->invocation.rules.empty());
+        // and governed v4 control on it fails CLOSED, not open:
+        ActionIntent legacyIntent;
+        legacyIntent.kind = ActionKind::CreateCppSymbol;
+        const PreparationPacket legacyPacket =
+            build_preparation_packet(*legacyRestored->state, legacyIntent);
+        QCD_CHECK(legacyPacket.failure == PreparationFailure::InvocationPolicyMissing);
+        QCD_CHECK(!legacyPacket.ready_for_judgment());
+    }
 
     // pit.port_never_reenters_service (P-42): the identity port receives the
     // governance snapshot as context
@@ -530,7 +635,7 @@ int main()
         addEvidence.base = w->revision;
         addEvidence.operations.push_back(Operation { .kind    = Operation::Kind::AddEvidence,
                                                      .scope   = "",
-                                                     .title   = "snap-70e3076be2f22d5f",
+                                                     .title   = "snap-aea527846a299800",
                                                      .payload = "genesis golden vector pinned" });
         QCD_CHECK(QivenContext::write_to_cognition(w, addEvidence, *g2).outcome == Verdict::Outcome::Applied);
     }
@@ -700,7 +805,7 @@ int main()
 
     // pit.resource_abuse_fails_closed (DR-009): bounded reserves, typed error
     Bytes abusive;
-    abusive.push_back(std::byte { 7 }); // serialization version (keep in sync with serialization_version_limit)
+    abusive.push_back(std::byte { 8 }); // serialization version (keep in sync with serialization_version_limit)
     for (unsigned i = 0; i < 4; ++i)
     {
         abusive.push_back(std::byte { 0 }); // empty root principal string

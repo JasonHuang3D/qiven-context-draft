@@ -41,7 +41,8 @@ named after the incident that motivated it.
 | [participant-model.md](participant-model.md) | Who are the participants, and what may each produce, consume, or authorize? Roles vs designations vs bindings; workflow dependency layering; the participant dependency matrix. |
 | [cognitive-boundary-model.md](cognitive-boundary-model.md) | The v4 seed: Judgment / Cognitive Control / Mechanism separated by specification closure; ActionIntent-driven cognition activation, invocation policy, PreparationPacket, and the V4-R invariants. |
 | [activation-failure-inventory.md](activation-failure-inventory.md) | v4 landing steps 2-3: the real persistence-success/activation-failure scars, the minimal ActionKind vocabulary they ground, and the ranked trigger/guard backlog. |
-| [v4-roadmap.md](v4-roadmap.md) | In what order does v4 land, and what proves each phase? v4.0-v4.5 complete; validation at the H1 boundary. |
+| [v4-roadmap.md](v4-roadmap.md) | In what order does v4 land, and what proves each phase? v4.0-v4.6 complete. |
+| [v4-stabilization-plan.md](v4-stabilization-plan.md) | Owner-authored pre-ADL remediation: S0-S3 findings, V4S batches, the acceptance matrix, the freeze rule, and the Runtime-ADL exit condition. |
 | [decisions.md](decisions.md) | Which design decisions were made and — equally — which alternatives were rejected, and why (negative knowledge, first-class). |
 | [pit-regression-map.md](pit-regression-map.md) | Where is every recorded pit encoded? The scar ledger: pit → evidence → type/gate/test → status. |
 | [invariant-inventory.md](invariant-inventory.md) | Which invariants are compiled, which are compilable, and which are judgment-only forever — stated honestly. |
