@@ -1,5 +1,5 @@
 add_executable(qiven-context-draft-loop cognition_loop.cpp)
-target_link_libraries(qiven-context-draft-loop PRIVATE qiven::context-draft)
+target_link_libraries(qiven-context-draft-loop PRIVATE qiven::context_draft)
 qiven_context_draft_enable_strong_warnings(qiven-context-draft-loop)
 
 set_target_properties(
@@ -10,7 +10,7 @@ set_target_properties(
 )
 
 add_executable(qiven-context-draft-artifact-trial artifact_trial.cpp)
-target_link_libraries(qiven-context-draft-artifact-trial PRIVATE qiven::context-draft)
+target_link_libraries(qiven-context-draft-artifact-trial PRIVATE qiven::context_draft)
 qiven_context_draft_enable_strong_warnings(qiven-context-draft-artifact-trial)
 
 set_target_properties(
