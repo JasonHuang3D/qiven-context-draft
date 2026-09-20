@@ -108,6 +108,27 @@ delivery profile named:
    candidate semantics accepted into kernel design or returned with concrete
    deltas.
 
+## Phase 5 — Participant model hardening (PROPOSED — not accepted)
+
+**Status.** Proposed by `participant-model.md` (2026-09-20, DR-017/018/019),
+pending owner review. Nothing lands until this phase is accepted; the corpus
+rules, headers do not advance ahead of it.
+
+**Deliverable.**
+
+- `RoleSpec` registry as cognition data (PolicyTable-adjacent) with
+  ratification provenance; the `Role` enum stays closed.
+- `SessionDesignation` runtime-sidecar type with the authority-delta-∅
+  construction test; `AuthenticatedActor` gains the optional designation.
+- Workflow profile layer/kind metadata on `ViewSpec` profile refs
+  (DR-018 layering).
+- I-PM scoped lints (I-PM1/I-PM4) over the canonical repositories, plus the
+  I-PM6 bundle blindness test.
+
+**Proof.** Designation delta test green; I-PM lints green on canonical
+repositories after their L3 sentences are reclassified or exempted as
+evidence; bundle blindness test; full default gate at the exact head.
+
 ## Sequencing rules
 
 - A phase lands only after the previous phase's pit tests are green; pit tests
