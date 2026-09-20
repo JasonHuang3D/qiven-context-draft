@@ -85,16 +85,24 @@ surfaces the existing `qiven::fnv1a64` for judgment without deciding
 reuse. The OPERATIONAL search machinery (real symbol/dependency index)
 remains execution-time mechanism work outside the draft, per seed §36.
 
-## Phase v4.6 — v4 validation (compiled proofs complete; H1 boundary reached)
+## Phase v4.6 — v4 validation ✅ (activation trial PASS, 2026-09-20)
 
 **Deliverable.** The §41 nine proof obligations executed and recorded;
 delivery profile named per obligation. H1 boundaries are EXPECTED here
 (fresh-consumer trials, any acceptance-producer roles) — the standing
 long-running window stops for them by definition.
 
-**Proof.** Dated validation report binding draft commit identity to the
-executed scenarios; canonical recording through the normal transaction
-path; only then do v4 semantics feed K5's transport design.
+**Proof.** All nine §41 obligations carry compiled proofs (repo-semantics
+profile, bound to exact heads); the artifact-causal activation trial PASSED
+2026-09-20 under the refined H1 definition (agent minted from published
+main e9a9aef; owner crossed the boundary; fresh GLM-5.3-Flash consumer,
+artifact-only, five tasks correct including a justified evidence-boundary
+abstention). One finding (F1: cross-repo guard-landing unrecorded) fixed
+in the same transaction — see
+`qiven-context evidence/audits/context-v4-activation-trial-2026-09-20.md`.
+v4.0-v4.6 COMPLETE; v4 activation semantics are accepted kernel design
+material per the OBL-20260918T215000Z-B4D6A8 path; v4 semantics now feed
+K5's transport design.
 
 ---
 
