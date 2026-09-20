@@ -19,6 +19,8 @@
 
 using namespace qiven::context;
 
+// pit.tool_contract_advertises_only_implemented_behavior (V4S-05/S1-04)
+
 int main()
 {
     // --- A6: the contract constructs; the guess fails -----------------------

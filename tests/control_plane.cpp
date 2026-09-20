@@ -90,7 +90,8 @@ int main()
     {
         const InvocationPolicy policy = default_invocation_policy();
         QCD_CHECK(policy.rules.size() == 11);
-        Snapshot snapshot; // V4S World A: policy ABSENT is a typed failure at
+        Snapshot snapshot; // pit.control_policy_missing_fails_closed
+                           // V4S World A: policy ABSENT is a typed failure at
         ActionIntent any;  // preparation time, never an empty derivation claim
         QCD_CHECK(build_preparation_packet(snapshot, any).failure ==
                   PreparationFailure::InvocationPolicyMissing);
@@ -142,6 +143,7 @@ int main()
         QCD_CHECK(after.ready_for_judgment());
     }
 
+    // pit.canonical_verification_is_not_memory_substring_search
     // --- V4S-03 / 27.7: a random record containing the phrase "canonical
     // record" must NOT satisfy VerifyCanonical - canonical verification is
     // not generic memory lookup; it stays Pending for an explicit resolver
@@ -214,6 +216,7 @@ int main()
                   first.intent.priorFailure->operation == "qiven gate");
         QCD_CHECK(!first.ready_for_judgment()); // no pit recalled yet: Failed
 
+        // pit.failure_fingerprint_connected_to_packet (27.8)
         // V4S-03 / 27.8: the fingerprint path CONNECTS to the packet
         Snapshot scarred = sample_snapshot();
         MemoryRecord scar;
@@ -253,7 +256,7 @@ int main()
         QCD_CHECK(searched.hits.front().symbol == "qiven::fnv1a64"); // surfaced
     }
 
-    // --- V4S-04 / 27.9: the claim axis is not decorative --------------------
+    // --- V4S-04 / 27.9: pit.claim_class_is_not_decorative -------------------
     {
         Snapshot snapshot = sample_snapshot();
         // isolate the scoped rule: replace the default policy so ONLY the
