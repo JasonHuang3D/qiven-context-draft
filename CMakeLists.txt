@@ -41,11 +41,45 @@ if(NOT TARGET qiven::foundation)
     unset(QIVEN_BUILD_TESTS)
 endif()
 
-add_library(qiven-context-draft STATIC
-    src/persistence.cpp
-    src/runtime.cpp
-)
+add_library(qiven-context-draft STATIC)
 add_library(qiven::context-draft ALIAS qiven-context-draft)
+
+set(
+    QIVEN_CONTEXT_DRAFT_PUBLIC_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/context/cognition.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/context/context.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/context/persistence.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/qiven/context/runtime.hpp
+)
+
+set(
+    QIVEN_CONTEXT_DRAFT_PRIVATE_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/persistence.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime.cpp
+)
+
+target_sources(
+    qiven-context-draft
+    PUBLIC
+        FILE_SET HEADERS
+        BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
+        FILES ${QIVEN_CONTEXT_DRAFT_PUBLIC_HEADERS}
+    PRIVATE
+        ${QIVEN_CONTEXT_DRAFT_PRIVATE_SOURCES}
+)
+
+if(CMAKE_GENERATOR MATCHES "^Visual Studio")
+    source_group(
+        TREE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        PREFIX "Header Files"
+        FILES ${QIVEN_CONTEXT_DRAFT_PUBLIC_HEADERS}
+    )
+    source_group(
+        TREE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+        PREFIX "Source Files"
+        FILES ${QIVEN_CONTEXT_DRAFT_PRIVATE_SOURCES}
+    )
+endif()
 
 target_compile_features(qiven-context-draft PUBLIC cxx_std_20)
 target_include_directories(
