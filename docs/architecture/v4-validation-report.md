@@ -54,3 +54,22 @@ rubric (evaluator role; the key never precedes the seal).
 The prepared kit (artifact path, digest, verbatim consumer prompt, relay
 instructions) is recorded in the v11 session checkpoint and the window's
 H1 kit file; the trial record lands in `evidence/audits/` on PASS.
+
+## V4S-07 — final stabilization validation record
+
+Validated exact head: `55a8fa9` (draft local gate PASS + merge-proof PASS,
+debug + release, 8/8 suites green). Verified per plan sec 33:
+
+- all original v4.6 proofs remain green under the stricter V4S semantics
+  (naming scenario, transport-stable activation, lower-layer interception,
+  tool-contract guess rejection, blind-retry refusal);
+- all new stabilization regressions green (genesis policy, World A/B,
+  legacy no-silent-synthesis, readiness split matrix, decoy recall,
+  fingerprint-connected pit recall, claim axis, needs-cannot-waive);
+- serialization golden intentionally re-pinned at v8
+  (`snap-aea527846a299800`); artifact corruption still fails closed;
+- pit traceability green (40 named tests, P-54..P-59 compiled).
+
+**v4 semantics freeze from this head.** Runtime ADL may replace mechanisms
+(string lookup, reference bool, fixed argv vector, in-memory miniature)
+but must preserve the semantic obligations (plan sec 35).
