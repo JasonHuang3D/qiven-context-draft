@@ -300,19 +300,28 @@ int main()
         const PreparationPacket withoutNeed = build_preparation_packet(snapshot, intent);
         QCD_CHECK(withNeed.discretionaryNeeds.size() == 1); // preserved
         QCD_CHECK(withoutNeed.discretionaryNeeds.empty());
+        // F-02 (freeze review sec 6-7): FULL requirement-shape equality.
+        // A discretionary need may ADD a request; it may NOT add/remove a
+        // CognitiveRequirement, change kind/subject/blocking/boundary,
+        // satisfy or fail a requirement, or alter readiness by its presence.
         QCD_CHECK(withNeed.requirements.size() == withoutNeed.requirements.size());
-        // a need cannot satisfy or remove the mandatory naming recall:
-        QCD_CHECK(!withNeed.ready_for_judgment() ||
-                  withNeed.requirements.front().status == RequirementStatus::Satisfied);
-        bool namingStillMandatory = false;
-        for (const auto& prepared : withNeed.requirements)
+        for (std::size_t i = 0; i < withNeed.requirements.size(); ++i)
         {
-            if (prepared.requirement.kind == RequirementKind::MandatoryRecall)
-            {
-                namingStillMandatory = true;
-            }
+            const auto& a = withNeed.requirements[i];
+            const auto& b = withoutNeed.requirements[i];
+            QCD_CHECK(a.requirement.kind == b.requirement.kind);
+            QCD_CHECK(a.requirement.subject == b.requirement.subject);
+            QCD_CHECK(a.requirement.blocking == b.requirement.blocking);
+            QCD_CHECK(a.boundary == b.boundary);
+            QCD_CHECK(a.status == b.status);
+            QCD_CHECK(a.evidence == b.evidence);
         }
-        QCD_CHECK(namingStillMandatory);
+        QCD_CHECK(withNeed.ready_for_judgment() == withoutNeed.ready_for_judgment());
+        QCD_CHECK(withNeed.ready_for_execution() == withoutNeed.ready_for_execution());
+        QCD_CHECK(withNeed.failure == withoutNeed.failure);
+        QCD_CHECK(withNeed.discretionaryNeeds.size() == 1);
+        QCD_CHECK(withoutNeed.discretionaryNeeds.empty());
+        // the only difference IS the discretionary channel itself
     }
 
     std::printf("%s", "[ OK ] control plane V4S-02: naming, transport, fail-closed, "
