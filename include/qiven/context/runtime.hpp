@@ -164,6 +164,9 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
 {                        // is selected by POLICY OBLIGATIONS attached to the
                          // action, not by similarity alone (§21).
     ActionIntent intent;
+    std::vector<CognitiveNeed> discretionaryNeeds;           // S1-02: participant-requested
+                                                             // epistemic assistance, kept visible;
+                                                             // it can never WAIVE a mandate
     std::vector<PreparedRequirement> requirements;           // derived demands + lifecycle
     std::vector<std::string> mandatoryContext;               // resolved cognition
     std::vector<std::string> knownPits;                      // resolved pit records
@@ -216,7 +219,12 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
     std::vector<PreparedRequirement> out;
     for (const auto& rule : snapshot.invocation.rules)
     {
-        if (rule.action == intent.kind)
+        // S1-01: the claim axis MATERIALLY participates - a claim-scoped
+        // rule applies only when both action and claim class match; an
+        // unscoped rule applies to every claim class of that action.
+        const bool claimMatches = !rule.claimClass.has_value() ||
+                                  *rule.claimClass == intent.claimClass;
+        if (rule.action == intent.kind && claimMatches)
         {
             out.push_back(PreparedRequirement {
                 CognitiveRequirement { rule.requirement, rule.subject, rule.blocking },
@@ -319,10 +327,12 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
 // A blocking recall that finds nothing lands in `unresolved` - the action
 // may not proceed (seed §28 step 7).
 [[nodiscard]] inline PreparationPacket build_preparation_packet(
-    const Snapshot& snapshot, const ActionIntent& intent)
+    const Snapshot& snapshot, const ActionIntent& intent,
+    const std::vector<CognitiveNeed>& discretionaryNeeds = {})
 {
     PreparationPacket packet;
-    packet.intent = intent;
+    packet.intent             = intent;
+    packet.discretionaryNeeds = discretionaryNeeds; // carried, never enforced
     if (!snapshot.invocation.present)
     {
         // S0-02: an absent policy is NOT the statement "no requirements

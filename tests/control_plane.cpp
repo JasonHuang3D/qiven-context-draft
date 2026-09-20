@@ -253,6 +253,64 @@ int main()
         QCD_CHECK(searched.hits.front().symbol == "qiven::fnv1a64"); // surfaced
     }
 
+    // --- V4S-04 / 27.9: the claim axis is not decorative --------------------
+    {
+        Snapshot snapshot = sample_snapshot();
+        // isolate the scoped rule: replace the default policy so ONLY the
+        // claim-scoped row exists for this action (the default also carries
+        // an unscoped MakeCanonicalClaim row that would match any class)
+        snapshot.invocation         = InvocationPolicy {};
+        snapshot.invocation.present = true;
+        InvocationRule claimScoped;
+        claimScoped.action      = ActionKind::MakeCanonicalClaim;
+        claimScoped.claimClass  = ClaimClass::CanonicalFact;
+        claimScoped.requirement = RequirementKind::VerifyCanonical;
+        claimScoped.subject     = "canonical record";
+        snapshot.invocation.rules.push_back(claimScoped);
+
+        ActionIntent asCanonical = []() {
+            ActionIntent intent;
+            intent.kind       = ActionKind::MakeCanonicalClaim;
+            intent.claimClass = ClaimClass::CanonicalFact;
+            return intent;
+        }();
+        ActionIntent asLocalRecall = asCanonical;
+        asLocalRecall.claimClass   = ClaimClass::LocalRecall; // ONLY the claim differs
+
+        const auto canonicalRows = derive_requirements(snapshot, asCanonical);
+        const auto localRows     = derive_requirements(snapshot, asLocalRecall);
+        QCD_CHECK(!canonicalRows.empty()); // scoped rule applied
+        QCD_CHECK(localRows.empty());      // ...and not to the other class
+    }
+
+    // --- V4S-04 / 27.10: discretionary needs ride along, never waive --------
+    {
+        const Snapshot snapshot = sample_snapshot();
+        ActionIntent intent;
+        intent.kind = ActionKind::CreateCppSymbol;
+        CognitiveNeed wantMore;
+        wantMore.kind    = CognitiveNeedKind::SearchEvidence;
+        wantMore.subject = "naming examples";
+        const PreparationPacket withNeed =
+            build_preparation_packet(snapshot, intent, { wantMore });
+        const PreparationPacket withoutNeed = build_preparation_packet(snapshot, intent);
+        QCD_CHECK(withNeed.discretionaryNeeds.size() == 1); // preserved
+        QCD_CHECK(withoutNeed.discretionaryNeeds.empty());
+        QCD_CHECK(withNeed.requirements.size() == withoutNeed.requirements.size());
+        // a need cannot satisfy or remove the mandatory naming recall:
+        QCD_CHECK(!withNeed.ready_for_judgment() ||
+                  withNeed.requirements.front().status == RequirementStatus::Satisfied);
+        bool namingStillMandatory = false;
+        for (const auto& prepared : withNeed.requirements)
+        {
+            if (prepared.requirement.kind == RequirementKind::MandatoryRecall)
+            {
+                namingStillMandatory = true;
+            }
+        }
+        QCD_CHECK(namingStillMandatory);
+    }
+
     std::printf("%s", "[ OK ] control plane V4S-02: naming, transport, fail-closed, "
                       "readiness split, lower-layer interception\n");
     return 0;
