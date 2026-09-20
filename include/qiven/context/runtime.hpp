@@ -228,6 +228,90 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
     return out;
 }
 
+// --- v4.4 / A7: failure is an invocation trigger (seed §18/§19) ----------
+// A material failure creates evidence; the next action must not be an
+// equivalent retry with nothing new (V4-R3: blind retry is not recovery).
+
+// Normalize a failure message for fingerprint stability: drop volatile
+// tokens (long digit runs = timestamps/ids; temp-path fragments). The
+// fingerprint identity must survive incidental text, not encode it.
+[[nodiscard]] inline std::string normalize_failure_text(const std::string& message)
+{
+    std::string out;
+    std::string word;
+    const auto flush = [&]() {
+        if (word.empty())
+        {
+            return;
+        }
+        bool volatileToken = false;
+        std::size_t digits = 0;
+        for (const char c : word)
+        {
+            if (c >= '0' && c <= '9')
+            {
+                ++digits;
+            }
+        }
+        if (digits >= 4)
+        {
+            volatileToken = true; // timestamp / large id
+        }
+        if (word.find("tmp") != std::string::npos ||
+            word.find(".generated-temp") != std::string::npos)
+        {
+            volatileToken = true; // temp path fragment
+        }
+        if (!volatileToken)
+        {
+            if (!out.empty())
+            {
+                out += ' ';
+            }
+            out += word;
+        }
+        word.clear();
+    };
+    for (const char c : message)
+    {
+        if (c == ' ' || c == '\t' || c == '\n')
+        {
+            flush();
+        }
+        else
+        {
+            word += c;
+        }
+    }
+    flush();
+    return out;
+}
+
+// Pit recall from a fingerprint: memory records (risk/lesson class) whose
+// text matches the fingerprint's tool or category — the known-pit lookup
+// that must precede any retry (seed §18).
+[[nodiscard]] inline std::vector<std::string> find_related_records(
+    const Snapshot& snapshot, const FailureFingerprint& fingerprint)
+{
+    std::vector<std::string> out;
+    for (const auto& record : snapshot.memory)
+    {
+        if (record.kind != MemoryRecord::Kind::Risk &&
+            record.kind != MemoryRecord::Kind::Lesson)
+        {
+            continue;
+        }
+        const bool matches = record.title.find(fingerprint.tool) != std::string::npos ||
+                             record.statement.find(fingerprint.tool) != std::string::npos ||
+                             record.title.find(fingerprint.category) != std::string::npos;
+        if (matches)
+        {
+            out.push_back(record.title + ": " + record.statement);
+        }
+    }
+    return out;
+}
+
 // Build the preparation packet: recall-class requirements resolve against
 // the snapshot (memory titles / profile ids as retrieval keys, v1); action-
 // class requirements (verify-live, run-check, ask-human...) are listed as
@@ -247,53 +331,75 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
         return packet;
     }
     packet.requirements = derive_requirements(snapshot, intent);
-    // V4S-02 semantics: only snapshot-local recall attempts transition a
-    // status; every other requirement stays Pending until an explicit
-    // resolver exists (V4S-03 narrows the auto-resolved set further).
-    // A blocking recall that finds nothing becomes Failed - the action is
-    // not ready for judgment (seed sec 28 step 7).
+    // V4S-03 resolver semantics (plan sec 9):
+    // - MandatoryRecall auto-resolves by EXACT key (title == subject or
+    //   profile.id == subject); incidental prose similarity must never
+    //   satisfy a blocking requirement (S0-04 error C).
+    // - InspectKnownPit resolves ONLY through the FailureFingerprint path
+    //   (S0-04 error B): priorFailure -> find_related_records -> knownPits;
+    //   missing fingerprint or no hits on a blocking rule = Failed (9.3).
+    // - VerifyCanonical is NOT generic memory lookup (S0-04 error A): it
+    //   stays Pending until an explicit canonical resolver exists (ADL).
     for (auto& prepared : packet.requirements)
     {
         const CognitiveRequirement& requirement = prepared.requirement;
-        const bool recallClass                  = requirement.kind == RequirementKind::MandatoryRecall ||
-                                 requirement.kind == RequirementKind::VerifyCanonical ||
-                                 requirement.kind == RequirementKind::InspectKnownPit;
-        if (!recallClass)
+        if (requirement.kind == RequirementKind::MandatoryRecall)
         {
-            continue; // an action-class demand: listed Pending, satisfied at execution
-        }
-        bool resolved = false;
-        for (const auto& record : snapshot.memory)
-        {
-            if (record.title.find(requirement.subject) != std::string::npos ||
-                record.statement.find(requirement.subject) != std::string::npos)
+            for (const auto& record : snapshot.memory)
             {
-                packet.mandatoryContext.push_back(record.title + ": " + record.statement);
-                prepared.evidence.push_back(record.title);
-                resolved = true;
+                if (record.title == requirement.subject)
+                {
+                    packet.mandatoryContext.push_back(record.title + ": " + record.statement);
+                    prepared.evidence.push_back(record.title);
+                }
+            }
+            for (const auto& profile : snapshot.profiles)
+            {
+                if (profile.id == requirement.subject)
+                {
+                    packet.mandatoryContext.push_back(profile.id + ": " + profile.summary);
+                    prepared.evidence.push_back(profile.id);
+                }
+            }
+            if (!prepared.evidence.empty())
+            {
+                prepared.status = RequirementStatus::Satisfied;
+            }
+            else if (requirement.blocking)
+            {
+                prepared.status = RequirementStatus::Failed;
+                if (packet.failure == PreparationFailure::None)
+                {
+                    packet.failure = PreparationFailure::RequiredRecallMissing;
+                }
             }
         }
-        for (const auto& profile : snapshot.profiles)
+        else if (requirement.kind == RequirementKind::InspectKnownPit)
         {
-            if (profile.id.find(requirement.subject) != std::string::npos)
+            if (intent.priorFailure.has_value())
             {
-                packet.mandatoryContext.push_back(profile.id + ": " + profile.summary);
-                prepared.evidence.push_back(profile.id);
-                resolved = true;
+                for (const auto& entry : find_related_records(snapshot, *intent.priorFailure))
+                {
+                    packet.knownPits.push_back(entry);
+                    prepared.evidence.push_back(entry);
+                }
+                if (!prepared.evidence.empty())
+                {
+                    prepared.status = RequirementStatus::Satisfied;
+                }
+            }
+            if (prepared.status != RequirementStatus::Satisfied && requirement.blocking)
+            {
+                prepared.status = RequirementStatus::Failed;
+                if (packet.failure == PreparationFailure::None)
+                {
+                    packet.failure = PreparationFailure::RequiredRecallMissing;
+                }
             }
         }
-        if (resolved)
-        {
-            prepared.status = RequirementStatus::Satisfied;
-        }
-        else if (requirement.blocking)
-        {
-            prepared.status = RequirementStatus::Failed;
-            if (packet.failure == PreparationFailure::None)
-            {
-                packet.failure = PreparationFailure::RequiredRecallMissing;
-            }
-        }
+        // VerifyCanonical / VerifyLive / SearchLowerLayer / InspectToolContract /
+        // RunMechanicalCheck / RequestReview / AskHuman stay Pending: their
+        // satisfaction is execution-time mechanism (Runtime ADL owns those).
     }
     return packet;
 }
@@ -405,90 +511,6 @@ struct ExistingImplementationReport // the evidence judgment receives
         return true; // not this boundary
     }
     return report.searched;
-}
-
-// --- v4.4 / A7: failure is an invocation trigger (seed §18/§19) ----------
-// A material failure creates evidence; the next action must not be an
-// equivalent retry with nothing new (V4-R3: blind retry is not recovery).
-
-// Normalize a failure message for fingerprint stability: drop volatile
-// tokens (long digit runs = timestamps/ids; temp-path fragments). The
-// fingerprint identity must survive incidental text, not encode it.
-[[nodiscard]] inline std::string normalize_failure_text(const std::string& message)
-{
-    std::string out;
-    std::string word;
-    const auto flush = [&]() {
-        if (word.empty())
-        {
-            return;
-        }
-        bool volatileToken = false;
-        std::size_t digits = 0;
-        for (const char c : word)
-        {
-            if (c >= '0' && c <= '9')
-            {
-                ++digits;
-            }
-        }
-        if (digits >= 4)
-        {
-            volatileToken = true; // timestamp / large id
-        }
-        if (word.find("tmp") != std::string::npos ||
-            word.find(".generated-temp") != std::string::npos)
-        {
-            volatileToken = true; // temp path fragment
-        }
-        if (!volatileToken)
-        {
-            if (!out.empty())
-            {
-                out += ' ';
-            }
-            out += word;
-        }
-        word.clear();
-    };
-    for (const char c : message)
-    {
-        if (c == ' ' || c == '\t' || c == '\n')
-        {
-            flush();
-        }
-        else
-        {
-            word += c;
-        }
-    }
-    flush();
-    return out;
-}
-
-// Pit recall from a fingerprint: memory records (risk/lesson class) whose
-// text matches the fingerprint's tool or category — the known-pit lookup
-// that must precede any retry (seed §18).
-[[nodiscard]] inline std::vector<std::string> find_related_records(
-    const Snapshot& snapshot, const FailureFingerprint& fingerprint)
-{
-    std::vector<std::string> out;
-    for (const auto& record : snapshot.memory)
-    {
-        if (record.kind != MemoryRecord::Kind::Risk &&
-            record.kind != MemoryRecord::Kind::Lesson)
-        {
-            continue;
-        }
-        const bool matches = record.title.find(fingerprint.tool) != std::string::npos ||
-                             record.statement.find(fingerprint.tool) != std::string::npos ||
-                             record.title.find(fingerprint.category) != std::string::npos;
-        if (matches)
-        {
-            out.push_back(record.title + ": " + record.statement);
-        }
-    }
-    return out;
 }
 
 // The retry rule (V4-R3): an equivalent retry — same tool+operation, same

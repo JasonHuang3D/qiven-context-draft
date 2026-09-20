@@ -98,10 +98,19 @@ int main()
 
     // --- §29: the naming scenario ------------------------------------------
     {
-        const Snapshot snapshot = sample_snapshot();
+        Snapshot snapshot = sample_snapshot();
+        MemoryRecord decoy; // pit.similar_prose_does_not_satisfy_naming_policy
+        decoy.kind      = MemoryRecord::Kind::Fact;
+        decoy.title     = "conventions chat"; // NOT the exact key
+        decoy.statement = "someone mentioned the naming policy in passing";
+        snapshot.memory.push_back(decoy);
         ActionIntent intent; // a fresh generation creating an identifier
         intent.kind                    = ActionKind::CreateCppSymbol;
         const PreparationPacket packet = build_preparation_packet(snapshot, intent);
+        for (const auto& entry : packet.mandatoryContext)
+        {
+            QCD_CHECK(entry.find("conventions chat") == std::string::npos);
+        }
         QCD_CHECK(hasRequirement(packet.requirements, RequirementKind::MandatoryRecall));
         QCD_CHECK(!packet.mandatoryContext.empty());
         bool carriesPolicy = false;
@@ -133,16 +142,30 @@ int main()
         QCD_CHECK(after.ready_for_judgment());
     }
 
-    // --- fail-closed: a blocking recall that finds nothing ------------------
+    // --- V4S-03 / 27.7: a random record containing the phrase "canonical
+    // record" must NOT satisfy VerifyCanonical - canonical verification is
+    // not generic memory lookup; it stays Pending for an explicit resolver
     {
         Snapshot snapshot = sample_snapshot();
-        snapshot.memory.clear(); // the canonical record does not exist here
-        snapshot.profiles.clear();
+        MemoryRecord phraseDecoy;
+        phraseDecoy.kind      = MemoryRecord::Kind::Fact;
+        phraseDecoy.title     = "hallway note";
+        phraseDecoy.statement = "the canonical record might be somewhere";
+        snapshot.memory.push_back(phraseDecoy);
         ActionIntent intent;
         intent.kind                    = ActionKind::MakeCanonicalClaim;
         const PreparationPacket packet = build_preparation_packet(snapshot, intent);
         QCD_CHECK(hasRequirement(packet.requirements, RequirementKind::VerifyCanonical));
-        QCD_CHECK(packet.failure == PreparationFailure::RequiredRecallMissing);
+        QCD_CHECK(packet.failure == PreparationFailure::None); // not a recall failure
+        bool verifyPending = false;
+        for (const auto& prepared : packet.requirements)
+        {
+            if (prepared.requirement.kind == RequirementKind::VerifyCanonical)
+            {
+                verifyPending = prepared.status == RequirementStatus::Pending;
+            }
+        }
+        QCD_CHECK(verifyPending);                // PENDING, never accidentally Satisfied
         QCD_CHECK(!packet.ready_for_judgment()); // the action may not proceed
     }
 
@@ -190,7 +213,17 @@ int main()
         QCD_CHECK(first.intent.priorFailure.has_value() &&
                   first.intent.priorFailure->operation == "qiven gate");
         QCD_CHECK(!first.ready_for_judgment()); // no pit recalled yet: Failed
-        // (V4S-03 connects the FailureFingerprint lookup to this requirement)
+
+        // V4S-03 / 27.8: the fingerprint path CONNECTS to the packet
+        Snapshot scarred = sample_snapshot();
+        MemoryRecord scar;
+        scar.kind      = MemoryRecord::Kind::Lesson;
+        scar.title     = "qiven gate odyssey";
+        scar.statement = "one-assert-per-cycle cost a full gate each round";
+        scarred.memory.push_back(scar);
+        const PreparationPacket recalled = build_preparation_packet(scarred, intent);
+        QCD_CHECK(!recalled.knownPits.empty());   // the pit IS recalled
+        QCD_CHECK(recalled.ready_for_judgment()); // InspectKnownPit Satisfied
     }
 
     // --- V4.5 / A8 scenario (seed 41-2 in miniature): a Foundation duplicate
