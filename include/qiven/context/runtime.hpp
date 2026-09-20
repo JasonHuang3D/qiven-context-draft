@@ -127,19 +127,27 @@ struct CognitiveRequirement // a derived, action-scoped requirement
     bool blocking { true };
 };
 
+enum class PreparationFailure // S0-02: absence must be a TYPED failure, never
+{                             // an implicit "no requirements" fail-open state
+    None,
+    InvocationPolicyMissing, // World A: policy absent/unavailable -> fail closed
+    RequiredRecallMissing,   // a blocking recall failed to resolve
+};
+
 struct PreparationPacket // seed §20: the bridge back into Judgment. Content
 {                        // is selected by POLICY OBLIGATIONS attached to the
                          // action, not by similarity alone (§21).
     ActionIntent intent;
-    std::vector<CognitiveRequirement> requirements; // all derived demands
-    std::vector<std::string> mandatoryContext;      // resolved cognition
-    std::vector<std::string> knownPits;             // resolved pit records
-    std::vector<std::string> liveFacts;             // filled by live ports
-    std::vector<CognitiveRequirement> unresolved;   // blocking recall failures
+    std::vector<CognitiveRequirement> requirements;          // all derived demands
+    std::vector<std::string> mandatoryContext;               // resolved cognition
+    std::vector<std::string> knownPits;                      // resolved pit records
+    std::vector<std::string> liveFacts;                      // filled by live ports
+    std::vector<CognitiveRequirement> unresolved;            // blocking recall failures
+    PreparationFailure failure { PreparationFailure::None }; // S0-02
 
     [[nodiscard]] bool ready() const
     {
-        return unresolved.empty();
+        return failure == PreparationFailure::None && unresolved.empty();
     }
 };
 
@@ -170,7 +178,14 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
     const Snapshot& snapshot, const ActionIntent& intent)
 {
     PreparationPacket packet;
-    packet.intent       = intent;
+    packet.intent = intent;
+    if (!snapshot.invocation.present)
+    {
+        // S0-02: an absent policy is NOT the statement "no requirements
+        // exist". For governed v4 actions, control fails closed here.
+        packet.failure = PreparationFailure::InvocationPolicyMissing;
+        return packet;
+    }
     packet.requirements = derive_requirements(snapshot, intent);
     for (const auto& requirement : packet.requirements)
     {
