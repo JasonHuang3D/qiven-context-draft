@@ -202,8 +202,10 @@ demands them.
 2. **Reference-integrity sweep** (A3+A4) — two cases the same day. **COMPILED
    2026-09-20**: context `tools/check_references.py`, vacuity-proven,
    wired into the context-local and context-docs gates.
-3. **Merge-class full-gate proof** (A5, P-50 boundary) — Operator refuses
-   merge-class publication without recorded exact-head full-gate PASS.
+3. **Merge-class full-gate proof** (A5, P-50 boundary) — **COMPILED
+   2026-09-20**: devkit operator gate receipts + `gate_proof` builtin
+   (self-hosted, fail-closed vacuity-proven); context snapshot sync with
+   `merge-proof` task + the supervised-agent publish-boundary rule.
 4. **Tool-contract invocation** (A6) — route through Operator tasks; flag
    direct-CLI bypasses of declared contracts.
 5. **Failure-fingerprint + batched evidence** (A7) — generalize the
