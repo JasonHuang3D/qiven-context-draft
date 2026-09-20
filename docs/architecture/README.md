@@ -40,6 +40,7 @@ named after the incident that motivated it.
 | [process-model.md](process-model.md) | How does the loop actually run — two-layer execution, failure-response ladder, retrieval discipline, session economics, Git/CI discipline? |
 | [participant-model.md](participant-model.md) | Who are the participants, and what may each produce, consume, or authorize? Roles vs designations vs bindings; workflow dependency layering; the participant dependency matrix. |
 | [cognitive-boundary-model.md](cognitive-boundary-model.md) | The v4 seed: Judgment / Cognitive Control / Mechanism separated by specification closure; ActionIntent-driven cognition activation, invocation policy, PreparationPacket, and the V4-R invariants. |
+| [activation-failure-inventory.md](activation-failure-inventory.md) | v4 landing steps 2-3: the real persistence-success/activation-failure scars, the minimal ActionKind vocabulary they ground, and the ranked trigger/guard backlog. |
 | [decisions.md](decisions.md) | Which design decisions were made and — equally — which alternatives were rejected, and why (negative knowledge, first-class). |
 | [pit-regression-map.md](pit-regression-map.md) | Where is every recorded pit encoded? The scar ledger: pit → evidence → type/gate/test → status. |
 | [invariant-inventory.md](invariant-inventory.md) | Which invariants are compiled, which are compilable, and which are judgment-only forever — stated honestly. |
