@@ -28,32 +28,23 @@ independent producer, isolated fresh consumer) and is the H1 boundary.
 
 ## What remains for v4 acceptance — the H1 boundary
 
-The compiled proofs establish the SEMANTICS. What they cannot establish
-alone is **artifact-causal activation**: that a fresh, isolated consumer
-receiving only a handoff artifact (no repository, no prior session)
-reconstructs the invocation semantics and demonstrates obligations 1, 6
-and 8 from the artifact — the K4-shaped producer → artifact → isolated
-consumer topology (seed §41's "without relying on the participant's prior
-session memory", at full strength).
+The compiled proofs establish the SEMANTICS. The remaining acceptance
+step is **artifact-causal activation**: a fresh, isolated consumer
+receiving only a handoff artifact demonstrates that the rules v4 compiled
+are PRESENT and FINDABLE in carried cognition — the seed §5 failure class
+("a rule is present in context, but the reasoning that needed the rule
+proceeds as if it did not") tested at full artifact strength.
 
-**The standing window stops here by definition**: the trial needs an
-independent producer run through the owner's trusted local path (H1 —
-the K4 `k4-handoff-acceptance` producer pattern, exporting a snapshot
-that now carries the invocation policy), and an isolated fresh-LLM
-consumer session (owner-launched).
+**H1 per the refined isolation-boundary definition (2026-09-20,**
+`collaboration/human-handoff-boundary.md`): the producer run is
+deterministic and digest-verifiable, so the agent executes it (owner
+direction) against published main via the parameterized
+`k4-handoff-producer-main` task; the OWNER performs the boundary
+operations — verify the artifact identity, launch a fresh LLM session,
+attach the artifact with the prepared verbatim prompt, and relay the
+sealed reply back verbatim. The authoring session grades against the
+rubric (evaluator role; the key never precedes the seal).
 
-Proposed trial (for owner authorization):
-1. Owner runs the JasonPC producer gate against the published v4 candidate
-   (exact head after this branch merges); the K4 artifact machinery
-   already serializes `invocation` (v7) — no producer change needed.
-2. Owner launches a fresh LLM session receiving only the artifact plus
-   the generic K4 Phase A instruction, with three added Phase A tasks:
-   (a) state the naming-policy requirement for CreateCppSymbol;
-   (b) state whether a Publish action may proceed without a full-gate
-   receipt (it may not — P-53 rule travels in the policy);
-   (c) state the retry rule for a repeated identical failure.
-3. Phase B live verification confirms the artifact identity.
-
-PASS upgrades v4 semantics to accepted kernel design material per
-`OBL-20260918T215000Z-B4D6A8`'s validation path; the trial record lands in
-`evidence/audits/`.
+The prepared kit (artifact path, digest, verbatim consumer prompt, relay
+instructions) is recorded in the v11 session checkpoint and the window's
+H1 kit file; the trial record lands in `evidence/audits/` on PASS.
