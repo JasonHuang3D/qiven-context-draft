@@ -43,6 +43,7 @@ named after the incident that motivated it.
 | [activation-failure-inventory.md](activation-failure-inventory.md) | v4 landing steps 2-3: the real persistence-success/activation-failure scars, the minimal ActionKind vocabulary they ground, and the ranked trigger/guard backlog. |
 | [v4-roadmap.md](v4-roadmap.md) | In what order does v4 land, and what proves each phase? v4.0-v4.6 complete. |
 | [v4-stabilization-plan.md](v4-stabilization-plan.md) | Owner-authored pre-ADL remediation: S0-S3 findings, V4S batches, the acceptance matrix, the freeze rule, and the Runtime-ADL exit condition. |
+| [v4-freeze-cleanup-plan.md](v4-freeze-cleanup-plan.md) | Final pre-ADL residue cleanup: R-01 empty-selector wildcard fix, R-02 CognitiveNeed::mandatory removal, R-03/R-04 truth repairs, the freeze record. |
 | [decisions.md](decisions.md) | Which design decisions were made and — equally — which alternatives were rejected, and why (negative knowledge, first-class). |
 | [pit-regression-map.md](pit-regression-map.md) | Where is every recorded pit encoded? The scar ledger: pit → evidence → type/gate/test → status. |
 | [invariant-inventory.md](invariant-inventory.md) | Which invariants are compiled, which are compilable, and which are judgment-only forever — stated honestly. |

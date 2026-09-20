@@ -94,6 +94,64 @@ int main()
         QCD_CHECK(retry_permitted(prior, retry, RetryEvidenceState {}));
     }
 
+    // --- T1 / pit.empty_failure_selector_never_matches: an empty selector
+    // is NOT a wildcard - std::string::find("") matches every string ----
+    {
+        Snapshot snapshot;
+        MemoryRecord unrelated;
+        unrelated.kind      = MemoryRecord::Kind::Lesson;
+        unrelated.title     = "unrelated compiler lesson";
+        unrelated.statement = "completely unrelated";
+        snapshot.memory.push_back(unrelated);
+        FailureFingerprint empty;
+        empty.tool     = "";
+        empty.category = "";
+        QCD_CHECK(find_related_records(snapshot, empty).empty()); // no false hit
+    }
+
+    // --- T2: control stays BLOCKED on an under-specified fingerprint ------
+    {
+        Snapshot snapshot;
+        snapshot.invocation = default_invocation_policy();
+        MemoryRecord unrelated;
+        unrelated.kind      = MemoryRecord::Kind::Risk;
+        unrelated.title     = "unrelated disk risk";
+        unrelated.statement = "nothing to do with any tool here";
+        snapshot.memory.push_back(unrelated);
+        ActionIntent retry;
+        retry.kind      = ActionKind::RetryFailure;
+        retry.tool      = "git";
+        retry.operation = "status";
+        FailureFingerprint empty;
+        empty.tool                     = ""; // under-specified: selectors empty
+        empty.category                 = "";
+        retry.priorFailure             = empty;
+        const PreparationPacket packet = build_preparation_packet(snapshot, retry);
+        QCD_CHECK(packet.knownPits.empty());     // no false recall
+        QCD_CHECK(!packet.ready_for_judgment()); // InspectKnownPit Failed
+        QCD_CHECK(packet.failure == PreparationFailure::RequiredRecallMissing);
+    }
+
+    // --- T3: positive control - legitimate pit recall still works ---------
+    {
+        Snapshot scarred;
+        scarred.invocation = default_invocation_policy();
+        MemoryRecord scar;
+        scar.kind      = MemoryRecord::Kind::Lesson;
+        scar.title     = "qiven gate odyssey";
+        scar.statement = "one-assert-per-cycle cost a full gate each round";
+        scarred.memory.push_back(scar);
+        ActionIntent retry;
+        retry.kind = ActionKind::RetryFailure;
+        FailureFingerprint fp;
+        fp.tool                        = "qiven";
+        fp.stableMessage               = "gate local failed";
+        retry.priorFailure             = fp;
+        const PreparationPacket packet = build_preparation_packet(scarred, retry);
+        QCD_CHECK(!packet.knownPits.empty());   // the pit IS recalled
+        QCD_CHECK(packet.ready_for_judgment()); // requirement Satisfied
+    }
+
     std::printf("[ OK ] tool contracts + retry discipline: A6 guess fails, A7 blind retry refused\n");
     return 0;
 }

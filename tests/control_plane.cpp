@@ -205,6 +205,7 @@ int main()
         intent.kind = ActionKind::RetryFailure;
         FailureFingerprint fingerprint;
         fingerprint.operation          = "qiven gate";
+        fingerprint.tool               = "qiven"; // R-01: selectors non-empty
         fingerprint.stableMessage      = "exit 1";
         intent.priorFailure            = fingerprint;
         const PreparationPacket first  = build_preparation_packet(snapshot, intent);

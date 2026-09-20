@@ -112,12 +112,17 @@ enum class CognitiveNeedKind // seed §10: epistemic needs, not tool calls
     AskHuman
 };
 
-struct CognitiveNeed // the DISCRETIONARY path (seed §24): judgment recognizes
-{                    // uncertainty and requests; policy may REQUIRE regardless
+struct CognitiveNeed // the DISCRETIONARY path (seed §24). R-02 (freeze
+{                    // cleanup): CognitiveNeed is ALWAYS discretionary - a
+                     // participant may request additional epistemic work but
+                     // cannot create, satisfy, waive or upgrade a mandatory
+                     // CognitiveRequirement; mandatory obligations
+                     // originate ONLY from InvocationPolicy. The former
+                     // decorative `mandatory` bool is removed (it advertised
+                     // a capability the type does not possess).
     CognitiveNeedKind kind { CognitiveNeedKind::Recall };
     std::string subject;
     std::string scope;
-    bool mandatory { false };
 };
 
 struct CognitiveRequirement // a derived, action-scoped requirement
@@ -309,10 +314,19 @@ struct PreparationPacket // seed §20: the bridge back into Judgment. Content
         {
             continue;
         }
-        const bool matches = record.title.find(fingerprint.tool) != std::string::npos ||
-                             record.statement.find(fingerprint.tool) != std::string::npos ||
-                             record.title.find(fingerprint.category) != std::string::npos;
-        if (matches)
+        // R-01 (freeze cleanup): an EMPTY selector contributes no match -
+        // std::string::find("") succeeds on everything, which previously
+        // let an under-specified fingerprint wildcard-match unrelated
+        // Lesson/Risk records and falsely satisfy InspectKnownPit.
+        const bool toolMatch =
+            !fingerprint.tool.empty() &&
+            (record.title.find(fingerprint.tool) != std::string::npos ||
+             record.statement.find(fingerprint.tool) != std::string::npos);
+        const bool categoryMatch =
+            !fingerprint.category.empty() &&
+            (record.title.find(fingerprint.category) != std::string::npos ||
+             record.statement.find(fingerprint.category) != std::string::npos);
+        if (toolMatch || categoryMatch)
         {
             out.push_back(record.title + ": " + record.statement);
         }
@@ -437,9 +451,9 @@ struct ToolContract // the declared, machine-readable argv contract.
     return word.size() >= 2 && word.front() == '{' && word.back() == '}';
 }
 
-// Construct the invocation from the contract, never from memory: template
-// fixed words are kept verbatim; {operation}/{tool}/{subject} substitute
-// from the intent; trailing allowed flags pass through in order.
+// Construct the invocation from the fixed declared template. Fixed words
+// remain verbatim; known placeholders substitute from ActionIntent.
+// Nothing else is accepted (validation enforces arity).
 [[nodiscard]] inline std::vector<std::string> construct_invocation(
     const ToolContract& contract, const ActionIntent& intent)
 {

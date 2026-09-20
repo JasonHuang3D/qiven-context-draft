@@ -142,3 +142,28 @@ findings closed, all S2/S3 findings truthfully represented:
 
 Freeze rule (plan sec 35) applies from the accepted V4S head: Runtime ADL
 may replace mechanisms but not the semantic obligations they preserve.
+
+---
+
+## Final residue cleanup and v4 freeze (2026-09-21)
+
+The post-V4S residue review (owner-authored
+`v4-freeze-cleanup-plan.md`) completed: R-01 empty-selector wildcard
+repaired with compiled regressions (P-60), R-02 `CognitiveNeed::mandatory`
+removed (P-61, discretionary cannot self-promote), R-03/R-04 truth
+repairs across the corpus and canonical state. Validated head `4cbc995`
+(gate + merge-proof PASS; serialization golden unchanged at v8).
+
+Final freeze record:
+
+```text
+v4 feature closeout:        complete
+V4S semantic stabilization: complete
+post-V4S residue review:    complete
+known semantic defects at freeze: none
+next boundary:              Runtime ADL
+```
+
+**v4 is frozen.** The correct claim remains: v4 is a stable executable
+specification of the semantics that the production Cognitive Control
+runtime must preserve - not a production runtime itself.

@@ -120,7 +120,7 @@ override with `QIVEN_FOUNDATION_ROOT`).
 
 - Canonical project cognition: `JasonHuang3D/qiven-context`
 - Conventions: `qiven-devkit` templates as applied by `qiven-foundation` / `qiven-math`
-- Design lineage: draft v0 (Jason), v1–v2 (ZCode+Jason pairing), v3 phases 1–2C
+- Design lineage: draft v0 (Jason); v1–v2 (ZCode+Jason pairing); v3 complete architecture hardening (Phase 4 validation closed); v4 cognition activation (v4.0–v4.6 + artifact-causal activation trial); V4S semantic stabilization; final freeze residue cleanup; Runtime ADL next.
 
 ## Agent notes
 
