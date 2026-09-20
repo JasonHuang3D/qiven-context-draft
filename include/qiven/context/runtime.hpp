@@ -53,6 +53,24 @@ struct ParticipantBinding        // runtime; CANNOT live in cognition (R1/R3)
     Qualification qualification; // serving model = disclosure duty (ADR-0035)
 };
 
+struct SessionDesignation                     // owner-granted, session-scoped process widening
+{                                             // (DR-017); RUNTIME SIDECAR, never cognition. The
+                                              // authority-delta-∅ invariant (I-PM3) is enforced BY
+                                              // ABSENCE: the type has no field that could express
+                                              // an authority — designations bypass PROCESS only.
+    std::string id;                           // "jason-extended-cognition"
+    Role base { Role::Brother };              // which canonical role it adapts
+    std::string grantRef;                     // owner-grant evidence pointer; a
+                                              // designation without a grant is
+                                              // NEVER valid (never self-assigned)
+    std::vector<std::string> processBypasses; // e.g. brother/worker partition
+};
+
+[[nodiscard]] inline bool designation_valid(const SessionDesignation& d)
+{
+    return !d.id.empty() && !d.grantRef.empty();
+}
+
 struct EvidenceGap          // typed absence: gaps are RECORDED, never synthesized
 {                           // (constitution #5; the v2-v5 missing sessions lesson)
     std::string what;       // what is missing or unresolved

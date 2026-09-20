@@ -24,7 +24,7 @@ namespace qiven::context
 {
 namespace
 {
-constexpr std::uint8_t serialization_version_limit = 5;
+constexpr std::uint8_t serialization_version_limit = 6;      // 6: roles registry + profile layer (DR-017/018)
 constexpr std::uint32_t max_serialized_records     = 100000; // resource-abuse guard (DR-009)
 
 // --- little-endian TLV writers (fixed field order, versioned) ----------------
@@ -298,6 +298,7 @@ Bytes serializeImpl(const Snapshot& snapshot)
         putStr(bytes, profile.id);
         putStr(bytes, profile.kind);
         putStr(bytes, profile.summary);
+        putU8(bytes, static_cast<std::uint8_t>(profile.layer)); // DR-018 layering
     }
 
     // pit.export_carries_view_specs: views are exported with the snapshot
@@ -312,6 +313,33 @@ Bytes serializeImpl(const Snapshot& snapshot)
         for (const auto& ref : view.profileRefs)
         {
             putStr(bytes, ref);
+        }
+    }
+
+    // DR-017: the canonical role registry is cognition data; exports carry it
+    putU32(bytes, static_cast<std::uint32_t>(snapshot.roles.size()));
+    for (const auto& role : snapshot.roles)
+    {
+        putU8(bytes, static_cast<std::uint8_t>(role.id));
+        putU32(bytes, static_cast<std::uint32_t>(role.authorities.size()));
+        for (const auto& authority : role.authorities)
+        {
+            putU8(bytes, static_cast<std::uint8_t>(authority));
+        }
+        putU32(bytes, static_cast<std::uint32_t>(role.duties.size()));
+        for (const auto& duty : role.duties)
+        {
+            putStr(bytes, duty);
+        }
+        putU8(bytes, role.floor.reviewGradeReasoning ? 1 : 0);
+        putU8(bytes, static_cast<std::uint8_t>(role.floor.execution));
+        putU8(bytes, role.floor.identityPortVerified ? 1 : 0);
+        putU32(bytes, static_cast<std::uint32_t>(role.provenance.sources.size()));
+        for (const auto& source : role.provenance.sources)
+        {
+            putU8(bytes, static_cast<std::uint8_t>(source.kind));
+            putStr(bytes, source.reference);
+            putStr(bytes, source.note);
         }
     }
 
@@ -513,6 +541,11 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
             profile.id      = reader.str("profile id");
             profile.kind    = reader.str("profile kind");
             profile.summary = reader.str("profile summary");
+            profile.layer   = reader.enumValue<WorkflowLayer>("profile layer", 3);
+            if (!reader.ok())
+            {
+                break;
+            }
             snapshot.profiles.push_back(std::move(profile));
         }
     }
@@ -532,6 +565,46 @@ DeserializeResult deserializeImpl(const Bytes& bytes)
             if (reader.ok())
             {
                 snapshot.views.push_back(std::move(view));
+            }
+        }
+    }
+
+    if (reader.ok())
+    {
+        const auto roleCount = reader.cappedCount("role count");
+        snapshot.roles.reserve(roleCount);
+        for (std::uint32_t i = 0; reader.ok() && i < roleCount; ++i)
+        {
+            RoleSpec spec;
+            spec.id = reader.enumValue<Role>("role id", 2);
+            if (!reader.ok())
+            {
+                break;
+            }
+            const auto authorityCount = reader.cappedCount("role authorities");
+            spec.authorities.reserve(authorityCount);
+            for (std::uint32_t k = 0; reader.ok() && k < authorityCount; ++k)
+            {
+                spec.authorities.push_back(
+                    reader.enumValue<OperationClass>("role authority", 5));
+            }
+            spec.duties                     = reader.stringVector("role duties");
+            spec.floor.reviewGradeReasoning = reader.u8("role floor reasoning") != 0;
+            spec.floor.execution            = reader.enumValue<CapabilityClass>("role floor execution", 2);
+            spec.floor.identityPortVerified = reader.u8("role floor identity") != 0;
+            const auto provCount            = reader.cappedCount("role provenance");
+            spec.provenance.sources.reserve(provCount);
+            for (std::uint32_t k = 0; reader.ok() && k < provCount; ++k)
+            {
+                SourceType s;
+                s.kind      = reader.enumValue<SourceType::Kind>("prov kind", 5);
+                s.reference = reader.str("prov reference");
+                s.note      = reader.str("prov note");
+                spec.provenance.sources.push_back(std::move(s));
+            }
+            if (reader.ok())
+            {
+                snapshot.roles.push_back(std::move(spec));
             }
         }
     }

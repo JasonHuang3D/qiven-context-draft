@@ -309,7 +309,7 @@ the chatgpt-jason / zcode-jason views; change ADR-0035/0036/0037 semantics
 unchanged: canonical prose contracts remain normative until
 `OBL-20260918T215000Z-B4D6A8` validation upgrades this corpus.
 
-## 7. Proposed Phase 5 (NOT accepted; pending owner review)
+## 7. Phase 5 (accepted by owner direction, 2026-09-20)
 
 - `RoleSpec` registry as cognition data (PolicyTable-adjacent), with
   provenance; `Role` enum stays closed.

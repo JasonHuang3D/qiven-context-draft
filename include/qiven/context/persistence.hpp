@@ -194,11 +194,28 @@ struct AuthenticatedActor
     std::string binding;      // which model instance fulfills the role
     std::string servingModel; // disclosure duty (ADR-0035 rule 4)
     std::string reasoning;    // serving reasoning effort
+    std::string designation;  // session designation id, empty = none (DR-017);
+                              // a NAME carried for audit — it grants nothing
 };
 
 [[nodiscard]] inline bool operator==(const AuthenticatedActor& a, const AuthenticatedActor& b)
 {
-    return a.principal == b.principal && a.role == b.role && a.binding == b.binding && a.servingModel == b.servingModel && a.reasoning == b.reasoning;
+    return a.principal == b.principal && a.role == b.role && a.binding == b.binding &&
+           a.servingModel == b.servingModel && a.reasoning == b.reasoning && a.designation == b.designation;
+}
+
+// I-PM3, compiled: effective authorities come from the ROLE REGISTRY ONLY.
+// A designation must not widen them — structurally true here because the
+// registry lookup never reads actor.designation. Unknown role => no authorities.
+[[nodiscard]] inline std::vector<OperationClass> effective_authorities(const Snapshot& snapshot,
+                                                                       const AuthenticatedActor& actor)
+{
+    const RoleSpec* spec = find_role_spec(snapshot, actor.role);
+    if (spec == nullptr || !role_spec_valid(*spec))
+    {
+        return {}; // fail-closed: unregistered or unprovenanced role
+    }
+    return spec->authorities;
 }
 
 // UNFORGEABLE LEASE (review §4): private constructor, move-only, no default.
