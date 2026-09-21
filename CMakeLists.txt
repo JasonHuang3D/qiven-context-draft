@@ -15,7 +15,7 @@ endif()
 
 function(qiven_context_draft_enable_strong_warnings target)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8)
+        target_compile_options(${target} PRIVATE /W4 /permissive- /utf-8 /MP)
     else()
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
     endif()
@@ -56,6 +56,28 @@ set(
     QIVEN_CONTEXT_DRAFT_PRIVATE_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/src/persistence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/runtime.cpp
+)
+
+# Build-performance policy (devkit docs/conventions/build-performance.md):
+# the draft monolith precompiles once for the library and is reused by the
+# test targets.
+target_precompile_headers(
+    qiven-context-draft
+    PRIVATE
+        <qiven/context/cognition.hpp>
+        <qiven/context/persistence.hpp>
+        <qiven/context/runtime.hpp>
+        <qiven/hashing.hpp>
+        <algorithm>
+        <array>
+        <cstdint>
+        <cstddef>
+        <memory>
+        <optional>
+        <span>
+        <string>
+        <utility>
+        <vector>
 )
 
 target_sources(
