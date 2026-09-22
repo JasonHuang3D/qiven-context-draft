@@ -25,7 +25,7 @@ set(QIVEN_FOUNDATION_ROOT "" CACHE PATH "Path to the qiven-foundation source tre
 # Cross-repo pin law (Devkit conventions: cross-repo-cmake.md; owner
 # direction 2026-09-23 - full SHA-pin coverage, no revisit deferrals):
 # consumption is validated against an exact commit at configure time.
-set(QIVEN_FOUNDATION_PINNED_SHA "424a9a8225f10d72a3a40d7c5cbd863382d32536")
+set(QIVEN_FOUNDATION_PINNED_SHA "79e67895a2a02a206d07660de1a483a856bc2612")
 
 if(NOT TARGET qiven::foundation)
     if(QIVEN_FOUNDATION_ROOT)
