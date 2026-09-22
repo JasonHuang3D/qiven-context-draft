@@ -22,6 +22,10 @@ function(qiven_context_draft_enable_strong_warnings target)
 endfunction()
 
 set(QIVEN_FOUNDATION_ROOT "" CACHE PATH "Path to the qiven-foundation source tree")
+# Cross-repo pin law (Devkit conventions: cross-repo-cmake.md; owner
+# direction 2026-09-23 - full SHA-pin coverage, no revisit deferrals):
+# consumption is validated against an exact commit at configure time.
+set(QIVEN_FOUNDATION_PINNED_SHA "424a9a8225f10d72a3a40d7c5cbd863382d32536")
 
 if(NOT TARGET qiven::foundation)
     if(QIVEN_FOUNDATION_ROOT)
@@ -34,6 +38,22 @@ if(NOT TARGET qiven::foundation)
        NOT EXISTS "${_qiven_foundation_source}/include/qiven/types.hpp" OR
        NOT EXISTS "${_qiven_foundation_source}/include/qiven/contracts.hpp")
         message(FATAL_ERROR "QIVEN_FOUNDATION_ROOT must identify a qiven-foundation source tree")
+    endif()
+
+    find_package(Git REQUIRED)
+    execute_process(
+        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
+        WORKING_DIRECTORY "${_qiven_foundation_source}"
+        RESULT_VARIABLE QIVEN_FOUNDATION_SHA_RESULT
+        OUTPUT_VARIABLE QIVEN_FOUNDATION_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(NOT QIVEN_FOUNDATION_SHA_RESULT EQUAL 0)
+        message(FATAL_ERROR "cannot read the qiven-foundation revision at ${_qiven_foundation_source}")
+    endif()
+    if(NOT QIVEN_FOUNDATION_SHA STREQUAL QIVEN_FOUNDATION_PINNED_SHA)
+        message(FATAL_ERROR "qiven-foundation is pinned at ${QIVEN_FOUNDATION_PINNED_SHA} but the checkout is at ${QIVEN_FOUNDATION_SHA}; re-pin explicitly in CMakeLists.txt and re-validate (layer contract)")
     endif()
 
     set(QIVEN_BUILD_TESTS OFF)
