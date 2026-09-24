@@ -21,45 +21,18 @@ function(qiven_context_draft_enable_strong_warnings target)
     endif()
 endfunction()
 
-set(QIVEN_FOUNDATION_ROOT "" CACHE PATH "Path to the qiven-foundation source tree")
-# Cross-repo pin law (Devkit conventions: cross-repo-cmake.md; owner
-# direction 2026-09-23 - full SHA-pin coverage, no revisit deferrals):
-# consumption is validated against an exact commit at configure time.
-set(QIVEN_FOUNDATION_PINNED_SHA "f28b86b0448c7b08c64f6c4bc11e0c327d240212")
-
-if(NOT TARGET qiven::foundation)
-    if(QIVEN_FOUNDATION_ROOT)
-        set(_qiven_foundation_source "${QIVEN_FOUNDATION_ROOT}")
-    else()
-        get_filename_component(_qiven_foundation_source "${CMAKE_CURRENT_SOURCE_DIR}/../qiven-foundation" ABSOLUTE)
-    endif()
-
-    if(NOT EXISTS "${_qiven_foundation_source}/CMakeLists.txt" OR
-       NOT EXISTS "${_qiven_foundation_source}/include/qiven/types.hpp" OR
-       NOT EXISTS "${_qiven_foundation_source}/include/qiven/contracts.hpp")
-        message(FATAL_ERROR "QIVEN_FOUNDATION_ROOT must identify a qiven-foundation source tree")
-    endif()
-
-    find_package(Git REQUIRED)
-    execute_process(
-        COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
-        WORKING_DIRECTORY "${_qiven_foundation_source}"
-        RESULT_VARIABLE QIVEN_FOUNDATION_SHA_RESULT
-        OUTPUT_VARIABLE QIVEN_FOUNDATION_SHA
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        ERROR_QUIET
-    )
-    if(NOT QIVEN_FOUNDATION_SHA_RESULT EQUAL 0)
-        message(FATAL_ERROR "cannot read the qiven-foundation revision at ${_qiven_foundation_source}")
-    endif()
-    if(NOT QIVEN_FOUNDATION_SHA STREQUAL QIVEN_FOUNDATION_PINNED_SHA)
-        message(FATAL_ERROR "qiven-foundation is pinned at ${QIVEN_FOUNDATION_PINNED_SHA} but the checkout is at ${QIVEN_FOUNDATION_SHA}; re-pin explicitly in CMakeLists.txt and re-validate (layer contract)")
-    endif()
-
-    set(QIVEN_BUILD_TESTS OFF)
-    add_subdirectory("${_qiven_foundation_source}" "${CMAKE_CURRENT_BINARY_DIR}/qiven-foundation" EXCLUDE_FROM_ALL)
-    unset(QIVEN_BUILD_TESTS)
+# --- workspace resolution (ADR-0052, WR-3 Foundation cutover) -------------
+# CMake receives the resolved Foundation root from the workspace adapter
+# (QIVEN_RESOLUTION_FILE, supplied by the gate-configure bootstrap); it
+# materializes the locked provider once per build graph and never resolves
+# siblings or checks a consumer-local pin.
+if(NOT DEFINED ENV{QIVEN_RESOLUTION_FILE} OR "$ENV{QIVEN_RESOLUTION_FILE}" STREQUAL "")
+    message(FATAL_ERROR
+        "QIVEN_RESOLUTION_FILE is not set - configure through the workspace bootstrap "
+        "(qiven-workspace gate-configure), not a bare cmake invocation")
 endif()
+include("$ENV{QIVEN_RESOLUTION_FILE}")
+qiven_workspace_materialize(qiven-foundation)
 
 add_library(qiven-context-draft STATIC)
 add_library(qiven::context_draft ALIAS qiven-context-draft)
