@@ -1,14 +1,18 @@
 # Process Model — The Loop as It Actually Runs
 
-**Status: frozen semantic contract (v4 freeze complete; last executable
-semantic change `4cbc995` per the v4 validation report).** Revised subset
-(2026-09-26 PR4 doc-repair): the original v3 design-input version is
-preserved verbatim at `legacy/process-model-v3-design-input.md`; this live
-path keeps every semantics-bearing section (the compiled §2 types are cited
-by `include/qiven/context/persistence.hpp` and `runtime.hpp`) under the
-ADR-0044 single-session reading. Nothing here changes how qiven-context
-runs today; canonical prose contracts and ADRs in
-`JasonHuang3D/qiven-context` remain normative.
+> Museum (2026-09-26 PR4 doc-repair): the original v3 design-input version,
+> preserved verbatim. Its §2 "two-layer execution (brother authors, worker
+> publishes)" role staging is superseded by ADR-0044 (single-session unified
+> engineering; role packages are attribution labels, not behavioral stages).
+> The current revised subset — with the §2 typed semantics (exact-head
+> binding, review digest binding, self-certification ban) preserved under the
+> single-session reading — lives at `docs/architecture/process-model.md`.
+
+**Status: candidate design input (ADR-0037).** This document encodes the
+*operational* process — how humans, client tools, models, devices and the store
+interact in real qiven-context usage — as typed vocabulary. The AI-first
+development pitfalls live here more than anywhere: nearly every recorded
+incident is a process failure that a data model could not see.
 
 ---
 
@@ -38,47 +42,45 @@ Properties that make this loop specifiable rather than merely describable:
    testable. That boundary is the whole reason an executable specification is
    possible.
 
-## 2. Execution discipline (ADR-0044 single-session model)
+## 2. Two-layer execution (brother authors, worker publishes)
 
-The original §2 assigned the typed execution artifacts to a two-role staging
-("brother authors, worker publishes"). ADR-0044 supersedes the staging —
-one capable owner-supervised session performs the full loop — and converts
-the duties the staging used to protect into **session duties**. The typed
-semantics are unchanged and remain the compiled contract:
+The 2026-09-18 owner direction (execution-stage granularity) is process law
+that v2 has no representation for. Typed form:
 
 ```cpp
 struct Qualification {          // ADR-0035: untested / provisional / qualified
     Status status;  EvidenceRefs evidence;  Date qualified;
     // upgrade to qualified is owner-reserved — reviewer self-certification ban
 };
-struct BatchDesign {            // the session's declared batch
+struct BatchDesign {            // what brother-side produces
     std::vector<FeatureSpec> queue;   // finite, ordered, with stop conditions
     ValidationProfile profile;        // FULL default; FOCUSED needs exact scope
     std::vector<ArchitecturalBarrier> barriers;
 };
-struct ExecutionRecord {        // what execution produces
+struct ExecutionRecord {        // what worker-side produces
     std::vector<GateResult> gates;    // exact commands, exact heads, real codes
     std::vector<ContentId> exactHeads;// validation binds to exact SHAs
     HandoffReport report;             // truthful PASS/NONE/CLEAN or bust
 };
-struct ReviewRecord {           // what review returns on the exact delta
+struct ReviewRecord {           // what brother-side returns on the exact delta
     Digest reviewedDeltaDigest;       // binds to DR-004's H2Evidence
     std::vector<Finding> findings;    // blocking / non-blocking, with evidence
     bool sameSessionLimitation;       // disclosed when reviewer ≈ author instance
 };
 ```
 
-Rules that compile from these types (single-session reading):
+Rules that compile from these types:
 
-- **Gate failures are design-review triggers.** A failed gate returns to
-  design review with the failing evidence, never to a patch/CI repetition
-  loop (constitution §17).
+- **Gate failures are handoff triggers.** The worker returns to the authoring
+  role with the failing evidence; the author corrects with a new commit; the
+  worker revalidates. A `InvariantFailed` verdict maps to "design review",
+  never to a worker-side fix attempt (constitution §17).
 - **Frozen layers.** Once a batch advances past a feature, that layer is frozen;
   a later defect in it stops and escalates — no autonomous history rewrites.
 - **Self-certification ban.** `ReviewRecord` carries the reviewing binding; a
   review of a delta authored by the same binding cannot satisfy the policy
   table's H2 row — the gate refuses, mirroring the delegated-review escalation
-  rule (non-delegable classes stay owner-reserved).
+  rule.
 
 ## 3. The failure-response ladder
 
@@ -160,7 +162,7 @@ Operator's `--json` is the other instance.
 ## 9. What this model deliberately does not encode
 
 Judgment. Which hazard classes are "known", whether evidence is "genuinely
-insufficient", whether a spec is ready for execution, review quality
+insufficient", whether a spec is ready for worker execution, review quality
 itself — these stay human/model judgments, pinned by decision records and the
 invariant inventory's judgment-only register rather than faked as types.
 Pretending they compile would be the next drift.

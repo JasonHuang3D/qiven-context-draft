@@ -35,7 +35,7 @@ Named per the ADR-0034 rule that every proof declares its profile:
 
 ## Phased acceptance map
 
-| Phase (v3-roadmap) | Proves | Evidence |
+| Phase (v3 roadmap, now `legacy/v3-roadmap.md`) | Proves | Evidence |
 | --- | --- | --- |
 | 0 — design corpus | the demand/supply model is written and reviewable | owner review of `docs/architecture/` (done 2026-09-19) |
 | 1 — authority, verdicts, corruption-safety | P0 pit tests green in Debug and Release: split-brain refusal, unverified actor, fail-closed grant state, content-bound H2, no-retry on handoff refusal, reader-boot preserves writer, corruption/resource fail-closed, golden vectors | Devkit gate PASS at exact head |
