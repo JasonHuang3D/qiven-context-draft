@@ -104,23 +104,30 @@ tests/                                  value-tree checks, fencing/pit suite, st
 docs/architecture/                      the design corpus (see its README)
 ```
 
-## Build (Windows / VS2022, mirrors qiven-math conventions)
+## Build (Windows / VS2022, workspace-resolved)
+
+Configure runs through the **Workspace bootstrap** (WR-3; ADR-0052): the
+CMakeLists requires `QIVEN_RESOLUTION_FILE`, produced by the workspace
+resolver — do NOT configure a bare sibling Foundation checkout (the former
+`QIVEN_FOUNDATION_ROOT` sibling-configure instruction is superseded):
 
 ```cmd
-cmake --preset vs2022-x64
+python ..\qiven-workspace\bootstrap\qiven-bootstrap.py gate-configure --devkit ..\qiven-devkit --repo qiven-context-draft --repo-root . --preset vs2022-x64 --cmake cmake
 cmake --build --preset vs2022-x64-debug
 ctest --preset vs2022-x64-debug
 apps\cognition_loop Debug\qiven-context-draft-loop.exe   % demo of the full loop
 ```
 
-Requires a sibling checkout of `qiven-foundation` (same rule as `qiven-math`;
-override with `QIVEN_FOUNDATION_ROOT`).
+Or use the repository gate (`tools\qiven.cmd gate`), which runs this path
+end-to-end (toolchain check, configure via bootstrap, build, tests,
+diff/clean checks).
 
 ## Related
 
 - Canonical project cognition: `JasonHuang3D/qiven-context`
-- Conventions: `qiven-devkit` templates as applied by `qiven-foundation` / `qiven-math`
-- Design lineage: draft v0 (Jason); v1–v2 (ZCode+Jason pairing); v3 complete architecture hardening (Phase 4 validation closed); v4 cognition activation (v4.0–v4.6 + artifact-causal activation trial); V4S semantic stabilization; final freeze residue cleanup; Runtime ADL next.
+- Conventions and engineering standards: canonical in `JasonHuang3D/qiven-devkit` (ADR-0046; `docs/conventions/README.md` and `docs/engineering/README.md` there; no local copy)
+- Dependency resolution: the workspace control repository `JasonHuang3D/qiven-workspace` (ADR-0052; the Build section above)
+- Design lineage: draft v0 (Jason); v1–v2 (ZCode+Jason pairing); v3 complete architecture hardening (Phase 4 validation closed); v4 cognition activation (v4.0–v4.6 + artifact-causal activation trial); V4S semantic stabilization; final freeze residue cleanup — **frozen** (dated final proof: `docs/architecture/v4-validation-report.md`, semantic pin `4cbc995`); the production path lives in qiven-runtime (Component ADL / MVP program).
 
 ## Agent notes
 
