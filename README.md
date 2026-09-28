@@ -71,8 +71,10 @@ Git is today's transport implementation, nothing more:
 | `head()` | rev-parse HEAD |
 
 Layered **transport ceremonies** are not part of the store contract: push/pull =
-replica sync; PR + review + merge = the H2 acceptance ceremony over the human-AI
-channel; **GitHub is a second device** (a cloud device running CI) that
+replica sync; review + merge = the H2 acceptance ceremony over the human-AI
+channel (the PR surface itself is repository-policy: retired for qiven-context
+— branch → gate PASS → merge; kept for qiven-docs as its cross-LLM
+deliberation surface); **GitHub is a second device** (a cloud device running CI) that
 validates appended states, with the evidence flowing back into cognition through
 ordinary gated transactions.
 
