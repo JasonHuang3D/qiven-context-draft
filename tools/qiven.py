@@ -12,6 +12,7 @@ the single implementation - template drift can no longer silently
 select an older one)."""
 
 import importlib
+import json
 import os
 import subprocess
 import sys
@@ -36,7 +37,7 @@ def _bootstrap_identity() -> None:
     completed = subprocess.run(
         [sys.executable, str(bootstrap), "preflight",
          "--control", str(control), "--devkit", str(DEVKIT_CHECKOUT)],
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=180,
     )
     if completed.returncode != 0:
         sys.stdout.write(completed.stdout)
@@ -45,6 +46,13 @@ def _bootstrap_identity() -> None:
             "[FAIL] workspace bootstrap rejected the local Devkit (WR-6: "
             "wrong local Devkit revision fails before Operator code executes)"
         )
+    try:
+        receipt = json.loads(completed.stdout)
+        for note in receipt.get("bootstrap_notes", []):
+            print(f"[wr6] devkit identity note: {note}", file=sys.stderr)
+    except json.JSONDecodeError:
+        print("[wr6] preflight receipt unreadable (notes not surfaced)",
+              file=sys.stderr)
 
 
 os.environ["QIVEN_TARGET_ROOT"] = str(TARGET_ROOT)
