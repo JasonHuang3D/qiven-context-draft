@@ -10,8 +10,10 @@ Regression coverage for this repository's four-element carriers:
           report mode stays exit-zero with an explicit NOTE (behavioral)
   B7b-D3  SG-6 closure: .github/workflows/ci.yml exists and matches the
           accepted ci.full profile shape the operator.json declaration
-          names (workflow_dispatch jobs input, typed plan admission with
-          WHY/NEXT, lock-resolved node checkouts (2026-10-03 pin
+          names (workflow_dispatch jobs input, typed plan admission and
+          ci-gate FAIL carrying the four-element law - WHAT/WHY/
+          EVIDENCE/NEXT (2026-10-03 extension outside the resolve job),
+          lock-resolved node checkouts (2026-10-03 pin
           cancellation; no node pins live in the workflow), ci-gate conclusion
           enforcement) - source pins
   B7b-D4  the operator.json ci.full registration resolves: the declared
@@ -110,8 +112,12 @@ def case_d3() -> None:
     text = workflow.read_text(encoding="utf-8")
     check("workflow_dispatch:" in text, "B7b-D3", "dispatch-only trigger")
     check("inputs:" in text and "jobs:" in text, "B7b-D3", "jobs input declared")
-    check("error: unknown validation unit(s):" in text, "B7b-D3",
-          "typed plan admission")
+    check("error: WHAT: unknown validation unit(s):" in text, "B7b-D3",
+          "typed plan admission (labeled WHAT)")
+    check("error: EVIDENCE: received jobs input string:" in text, "B7b-D3",
+          "plan FAIL carriers carry labeled EVIDENCE")
+    check("[FAIL] CI Gate: WHAT: a requested validation unit did not succeed"
+          in text, "B7b-D3", "ci-gate FAIL carries labeled WHAT")
     check("NEXT action: FIX - correct the unit name" in text, "B7b-D3",
           "plan FAIL carries the FIX route")
     check("JasonHuang3D/qiven-workspace" in text, "B7b-D3",

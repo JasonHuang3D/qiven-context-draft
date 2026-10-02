@@ -200,22 +200,28 @@ jobs:
           else:
               requested = [item.strip() for item in raw.split(",") if item.strip()]
               if not requested or "full" in requested:
-                  print("error: jobs must be 'full' or a comma-separated list of "
-                        "validation unit IDs (allowed: " + ", ".join(allowed) + ")",
-                        file=sys.stderr)
+                  print("error: WHAT: the jobs input is malformed - it must be "
+                        "'full' or a comma-separated list of validation unit IDs "
+                        "(allowed: " + ", ".join(allowed) + ")", file=sys.stderr)
                   print("error: WHY: the plan is the typed admission surface - an "
                         "unrecognized unit would validate nothing while appearing "
                         "to run CI (rule: draft/ci-plan)", file=sys.stderr)
+                  print("error: EVIDENCE: received jobs input string: "
+                        + repr(os.environ["REQUESTED_JOBS"]), file=sys.stderr)
                   print("error: NEXT action: FIX - re-dispatch with jobs=full or a "
                         "subset of: " + ", ".join(allowed), file=sys.stderr)
                   sys.exit(1)
               unknown = sorted(set(requested) - set(allowed))
               if unknown:
-                  print(f"error: unknown validation unit(s): {', '.join(unknown)} "
-                        "(allowed: " + ", ".join(allowed) + ")", file=sys.stderr)
+                  print("error: WHAT: unknown validation unit(s): "
+                        + ", ".join(unknown) + " (allowed: "
+                        + ", ".join(allowed) + ")", file=sys.stderr)
                   print("error: WHY: an unknown unit name cannot map to any matrix "
                         "leg; the run would be vacuous (rule: draft/ci-plan)",
                         file=sys.stderr)
+                  print("error: EVIDENCE: received jobs input string: "
+                        + repr(os.environ["REQUESTED_JOBS"]) + "; unknown "
+                        "token(s): " + ", ".join(unknown), file=sys.stderr)
                   print("error: NEXT action: FIX - correct the unit name from: "
                         + ", ".join(allowed) + ", then re-dispatch", file=sys.stderr)
                   sys.exit(1)
@@ -312,10 +318,11 @@ jobs:
           [[ "$PLAN_RESULT" == "success" ]] || ok=1
           [[ "$RUN_WINDOWS" != "true" || "$WINDOWS_RESULT" == "success" ]] || ok=1
           if [[ "$ok" != "0" ]]; then
-            echo "[FAIL] CI Gate: WHY: a requested validation unit did not succeed"
-            echo "  (resolve=${RESOLVE_RESULT}, plan=${PLAN_RESULT},"
-            echo "   windows=${WINDOWS_RESULT}; rule: draft/ci-gate -"
-            echo "   the conclusion is the enforcement, a skipped unit is not a pass)"
+            echo "[FAIL] CI Gate: WHAT: a requested validation unit did not succeed"
+            echo "  WHY: the conclusion is the enforcement, a skipped unit is not a"
+            echo "  pass (rule: draft/ci-gate)"
+            echo "  EVIDENCE: resolve=${RESOLVE_RESULT}, plan=${PLAN_RESULT},"
+            echo "  windows=${WINDOWS_RESULT}; requested units: ${SELECTED}"
             echo "  NEXT action: DIAGNOSE - open the failed unit's step logs above,"
             echo "  classify the failure, fix it at the validated revisions, then"
             echo "  re-dispatch jobs=${SELECTED}; a re-dispatch without a fix is not"
