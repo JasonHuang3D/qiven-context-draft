@@ -24,6 +24,9 @@
     "b3-carrier-tests": {
       "argv": ["{python}", "tools/b3_carrier_test.py"]
     },
+    "b7b-carrier-tests": {
+      "argv": ["{python}", "tools/b7b_carrier_test.py"]
+    },
     "build-debug": {
       "argv": ["{cmake}", "--build", "--preset", "vs2022-x64-debug", "--parallel"]
     },
@@ -58,6 +61,7 @@
     "local": [
       "check-toolchain",
       "b3-carrier-tests",
+      "b7b-carrier-tests",
       "format-check",
       "configure",
       ["build-debug", "build-release"],

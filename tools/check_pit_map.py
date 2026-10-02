@@ -44,6 +44,13 @@ def main() -> int:
         print("[FAIL] " + name + ": named in the pit map but not present in the test corpus")
     if missing:
         print("[FAIL] pit traceability: " + str(len(missing)) + " dangling name(s)")
+        # B7b (four-element law, ADR-0060 D3): the FAIL teaches its rule and
+        # the mechanical FIX route.
+        print("[FAIL] pit traceability: WHY: every scar-ledger pit must name a "
+              "compiling regression test (rule: draft/pit-traceability - scars "
+              "compile; a recorded pit without its test is an unenforced scar)")
+        print("       NEXT action: FIX - add the named test to the test corpus, or "
+              "mark its status column Phase 4/judgment in the map, then re-run")
         return 1
     print("[ OK ] pit traceability: every named test exists in the corpus")
     return 0

@@ -1,0 +1,178 @@
+name: CI
+run-name: CI / ${{ inputs.jobs }}
+
+# SG-6 closure (P0 repair batch B7b, 2026-10-02): .qiven/operator.json
+# declared the ci.full profile against ci.yml while this workflow was
+# absent from the tree (dangling registration, register v2). The
+# declaration is intentional (draft is a full cmake build repository
+# whose siblings runtime/math carry the same profile shape), so the
+# workflow LANDS here matching the accepted ci.full profile shape:
+# workflow_dispatch with a typed validation-unit plan, workspace-pinned
+# node checkouts at the lock revisions, and a ci-gate conclusion
+# enforcement job. Node pins ride the workspace lock generation of the
+# landing date; they are advanced by lock transactions at dispatch time
+# (explicit-dispatch law).
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: >-
+          Validation units: full, or comma-separated IDs: win-debug, win-release
+        required: true
+        default: full
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Validation plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      windows: ${{ steps.plan.outputs.windows }}
+      run_windows: ${{ steps.plan.outputs.run_windows }}
+      selected: ${{ steps.plan.outputs.selected }}
+    steps:
+      - name: Resolve requested validation units
+        id: plan
+        shell: bash
+        env:
+          REQUESTED_JOBS: ${{ inputs.jobs }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          allowed = ["win-debug", "win-release"]
+          raw = os.environ["REQUESTED_JOBS"].strip()
+          if raw == "full":
+              selected = allowed
+          else:
+              requested = [item.strip() for item in raw.split(",") if item.strip()]
+              if not requested or "full" in requested:
+                  print("error: jobs must be 'full' or a comma-separated list of "
+                        "validation unit IDs (allowed: " + ", ".join(allowed) + ")",
+                        file=sys.stderr)
+                  print("error: WHY: the plan is the typed admission surface - an "
+                        "unrecognized unit would validate nothing while appearing "
+                        "to run CI (rule: draft/ci-plan)", file=sys.stderr)
+                  print("error: NEXT action: FIX - re-dispatch with jobs=full or a "
+                        "subset of: " + ", ".join(allowed), file=sys.stderr)
+                  sys.exit(1)
+              unknown = sorted(set(requested) - set(allowed))
+              if unknown:
+                  print(f"error: unknown validation unit(s): {', '.join(unknown)} "
+                        "(allowed: " + ", ".join(allowed) + ")", file=sys.stderr)
+                  print("error: WHY: an unknown unit name cannot map to any matrix "
+                        "leg; the run would be vacuous (rule: draft/ci-plan)",
+                        file=sys.stderr)
+                  print("error: NEXT action: FIX - correct the unit name from: "
+                        + ", ".join(allowed) + ", then re-dispatch", file=sys.stderr)
+                  sys.exit(1)
+              selected = [item for item in allowed if item in set(requested)]
+          windows = []
+          if "win-debug" in selected:
+              windows.append({"build_type": "Debug"})
+          if "win-release" in selected:
+              windows.append({"build_type": "Release"})
+          outputs = {
+              "windows": json.dumps(windows, separators=(",", ":")),
+              "run_windows": str(bool(windows)).lower(),
+              "selected": ",".join(selected),
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key, value in outputs.items():
+                  print(f"{key}={value}", file=output)
+          PY
+
+  windows:
+    name: Windows MSVC x64 / ${{ matrix.build_type }}
+    needs: plan
+    if: ${{ needs.plan.outputs.run_windows == 'true' }}
+    runs-on: windows-2022
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.windows) }}
+    steps:
+      # CI validates the LOCKED workspace graph (WR-3 continuation): the
+      # control repository is pinned to the admitted revision and every
+      # node checkout rides the lock; runs are dispatched after a lock
+      # transaction advances (explicit-dispatch law).
+      - name: Checkout workspace control (pinned admitted revision)
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-workspace
+          ref: ea0a4054ab79ba45d1c10d062fea9dd84857e81a
+          path: qiven-workspace
+      - name: Checkout locked Devkit
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-devkit
+          ref: 60f27dd76534190cd69887ecb57ad9c0ae9b2342
+          path: qiven-devkit
+      - name: Checkout locked Foundation
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-foundation
+          ref: 55dd0864fab40db84000e1bf507d81937abaecaa
+          path: qiven-foundation
+      - name: Checkout locked draft candidate
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-context-draft
+          ref: 0e43e54076f10fb8c4f0c8a6ff35f10dd5652ead
+          path: qiven-context-draft
+      - name: Configure (workspace bootstrap)
+        run: >-
+          python qiven-workspace/bootstrap/qiven-bootstrap.py gate-configure
+          --control qiven-workspace --devkit qiven-devkit
+          --repo qiven-context-draft --repo-root qiven-context-draft
+          --preset vs2022-x64 --cmake cmake
+      - name: Build
+        run: >-
+          cmake --build qiven-context-draft/build/vs2022-x64
+          --config ${{ matrix.build_type }} --parallel
+      - name: Test
+        run: >-
+          ctest --test-dir qiven-context-draft/build/vs2022-x64
+          -C ${{ matrix.build_type }} --output-on-failure
+
+  ci-gate:
+    name: CI Gate
+    if: ${{ always() }}
+    needs: [plan, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Verify requested validation results
+        shell: bash
+        env:
+          PLAN_RESULT: ${{ needs.plan.result }}
+          RUN_WINDOWS: ${{ needs.plan.outputs.run_windows }}
+          WINDOWS_RESULT: ${{ needs.windows.result }}
+          SELECTED: ${{ needs.plan.outputs.selected }}
+        run: |
+          set -euo pipefail
+          ok=0
+          [[ "$PLAN_RESULT" == "success" ]] || ok=1
+          [[ "$RUN_WINDOWS" != "true" || "$WINDOWS_RESULT" == "success" ]] || ok=1
+          if [[ "$ok" != "0" ]]; then
+            echo "[FAIL] CI Gate: WHY: a requested validation unit did not succeed"
+            echo "  (plan=${PLAN_RESULT}, windows=${WINDOWS_RESULT}; rule: draft/ci-gate -"
+            echo "  the conclusion is the enforcement, a skipped unit is not a pass)"
+            echo "  NEXT action: DIAGNOSE - open the failed unit's step logs above,"
+            echo "  classify the failure, fix it at the validated revisions, then"
+            echo "  re-dispatch jobs=${SELECTED}; a re-dispatch without a fix is not"
+            echo "  a retry."
+            exit 1
+          fi
+          echo "Requested validation passed: $SELECTED"
