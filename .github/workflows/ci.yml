@@ -9,9 +9,15 @@ run-name: CI / ${{ inputs.jobs }}
 # workflow LANDS here matching the accepted ci.full profile shape:
 # workflow_dispatch with a typed validation-unit plan, workspace-pinned
 # node checkouts at the lock revisions, and a ci-gate conclusion
-# enforcement job. Node pins ride the workspace lock generation of the
-# landing date; they are advanced by lock transactions at dispatch time
-# (explicit-dispatch law).
+# enforcement job.
+#
+# 2026-10-03 adjudicated design (cancel CI dependency pins): the
+# landing-date node pins are REMOVED. Every dispatch names its own
+# candidate (required, full 40-hex-char SHA of this repo's commit under
+# test) and an optional workspace_ref for deliberate old-graph
+# reproduction (absent = workspace default branch head). The resolve job
+# reads workspace.lock.json at that workspace ref and every node checkout
+# rides the resolved lock SHAs; no node pins live in this file.
 
 on:
   workflow_dispatch:
@@ -22,6 +28,17 @@ on:
         required: true
         default: full
         type: string
+      candidate:
+        description: >-
+          Full 40-hex-char SHA of the qiven-context-draft commit under test
+        required: true
+        type: string
+      workspace_ref:
+        description: >-
+          Optional qiven-workspace ref for deliberate old-graph reproduction;
+          absent = workspace default branch head
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -31,6 +48,119 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  resolve:
+    name: Resolve run graph (candidate + workspace lock)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      candidate: ${{ steps.candidate.outputs.candidate }}
+      workspace_commit: ${{ steps.identity.outputs.workspace_commit }}
+      devkit_sha: ${{ steps.lock.outputs.devkit_sha }}
+      foundation_sha: ${{ steps.lock.outputs.foundation_sha }}
+    steps:
+      - name: Validate candidate admission (typed)
+        id: candidate
+        shell: bash
+        env:
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CANDIDATE" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "[FAIL] resolve/candidate: WHAT: the candidate input is malformed"
+            echo "  or missing - it must be the exact full 40-hex-char SHA of the"
+            echo "  qiven-context-draft commit under test"
+            echo "  WHY: a dispatch must name the exact head under test; a silent"
+            echo "  branch-head fallback would validate an unstated graph - the"
+            echo "  defect class this redesign eliminates (rule: draft/ci-resolve)"
+            echo "  EVIDENCE: received candidate input string: \"$CANDIDATE\""
+            echo "  NEXT action: FIX - re-dispatch with the full 40-char SHA of the"
+            echo "  intended head; this workflow never falls back to a branch head"
+            exit 1
+          fi
+          echo "candidate=${CANDIDATE,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout workspace control (dispatch ref or default)
+        uses: actions/checkout@v6
+        with:
+          repository: JasonHuang3D/qiven-workspace
+          ref: ${{ inputs.workspace_ref }}
+          path: qiven-workspace
+
+      - name: Resolve dependency graph from the workspace lock
+        id: lock
+        shell: bash
+        env:
+          LOCK_NODE_MAP: qiven-devkit=devkit_sha qiven-foundation=foundation_sha
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          lock_path = "qiven-workspace/workspace.lock.json"
+          try:
+              with open(lock_path, encoding="utf-8") as handle:
+                  lock = json.load(handle)
+          except Exception as error:
+              print(f"error: WHAT: cannot read the workspace lock at {lock_path}:"
+                    f" {error}", file=sys.stderr)
+              print("error: NEXT action: DIAGNOSE - inspect the dispatched"
+                    " workspace ref (rule: draft/ci-resolve)", file=sys.stderr)
+              sys.exit(1)
+          if lock.get("schema") != "qiven-workspace-lock-v1":
+              print("error: WHAT: unsupported lock schema: "
+                    + repr(lock.get("schema")), file=sys.stderr)
+              print("error: NEXT action: DIAGNOSE - inspect the dispatched"
+                    " workspace ref (rule: draft/ci-resolve)", file=sys.stderr)
+              sys.exit(1)
+          pairs = [item.split("=", 1) for item in os.environ["LOCK_NODE_MAP"].split()]
+          resolved = {}
+          unresolved = []
+          for node, key in pairs:
+              commit = lock.get("nodes", {}).get(node, {}).get("commit")
+              if commit and re.fullmatch(r"[0-9a-f]{40}", commit):
+                  resolved[key] = commit
+              else:
+                  unresolved.append(node)
+          if unresolved:
+              print("error: WHAT: the lock does not resolve node(s): "
+                    + ", ".join(sorted(unresolved)), file=sys.stderr)
+              print("error: WHY: the dispatch graph must be fully stated by the"
+                    " lock; an unresolved node has no fallback"
+                    " (rule: draft/ci-resolve)", file=sys.stderr)
+              print("error: NEXT action: DIAGNOSE - inspect workspace.lock.json"
+                  " at the dispatched workspace ref", file=sys.stderr)
+              sys.exit(1)
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key, sha in resolved.items():
+                  print(f"{key}={sha}", file=output)
+          PY
+
+      - name: Record run identity (this echo is the record)
+        id: identity
+        shell: bash
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.candidate }}
+          WORKSPACE_REF: ${{ inputs.workspace_ref }}
+          DEVKIT_SHA: ${{ steps.lock.outputs.devkit_sha }}
+          FOUNDATION_SHA: ${{ steps.lock.outputs.foundation_sha }}
+        run: |
+          set -euo pipefail
+          workspace_commit="$(git -C qiven-workspace rev-parse HEAD)"
+          if [[ -z "$WORKSPACE_REF" ]]; then
+            workspace_ref_used="default"
+          else
+            workspace_ref_used="$WORKSPACE_REF"
+          fi
+          echo "run identity (record):"
+          echo "  candidate: $CANDIDATE"
+          echo "  workspace_ref used: $workspace_ref_used"
+          echo "  workspace commit (lock source): $workspace_commit"
+          echo "  dependency graph (node -> resolved SHA):"
+          echo "    qiven-devkit -> $DEVKIT_SHA"
+          echo "    qiven-foundation -> $FOUNDATION_SHA"
+          echo "workspace_commit=$workspace_commit" >> "$GITHUB_OUTPUT"
+
   plan:
     name: Validation plan
     runs-on: ubuntu-24.04
@@ -94,7 +224,7 @@ jobs:
 
   windows:
     name: Windows MSVC x64 / ${{ matrix.build_type }}
-    needs: plan
+    needs: [plan, resolve]
     if: ${{ needs.plan.outputs.run_windows == 'true' }}
     runs-on: windows-2022
     timeout-minutes: 15
@@ -103,33 +233,34 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.plan.outputs.windows) }}
     steps:
-      # CI validates the LOCKED workspace graph (WR-3 continuation): the
-      # control repository is pinned to the admitted revision and every
-      # node checkout rides the lock; runs are dispatched after a lock
-      # transaction advances (explicit-dispatch law).
-      - name: Checkout workspace control (pinned admitted revision)
+      # CI validates the DISPATCH-STATED graph (2026-10-03 pin
+      # cancellation): the control repository rides the resolve job's
+      # lock read, the candidate is the dispatch input, and every
+      # dependency node checkout rides the SHAs resolved from
+      # workspace.lock.json. No node pins live in this file.
+      - name: Checkout workspace control (lock-read revision)
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-workspace
-          ref: ea0a4054ab79ba45d1c10d062fea9dd84857e81a
+          ref: ${{ needs.resolve.outputs.workspace_commit }}
           path: qiven-workspace
       - name: Checkout locked Devkit
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-devkit
-          ref: 60f27dd76534190cd69887ecb57ad9c0ae9b2342
+          ref: ${{ needs.resolve.outputs.devkit_sha }}
           path: qiven-devkit
       - name: Checkout locked Foundation
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-foundation
-          ref: 55dd0864fab40db84000e1bf507d81937abaecaa
+          ref: ${{ needs.resolve.outputs.foundation_sha }}
           path: qiven-foundation
-      - name: Checkout locked draft candidate
+      - name: Checkout draft candidate (dispatch)
         uses: actions/checkout@v6
         with:
           repository: JasonHuang3D/qiven-context-draft
-          ref: 0e43e54076f10fb8c4f0c8a6ff35f10dd5652ead
+          ref: ${{ needs.resolve.outputs.candidate }}
           path: qiven-context-draft
       - name: Configure (workspace bootstrap)
         run: >-
@@ -149,13 +280,14 @@ jobs:
   ci-gate:
     name: CI Gate
     if: ${{ always() }}
-    needs: [plan, windows]
+    needs: [resolve, plan, windows]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Verify requested validation results
         shell: bash
         env:
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
           PLAN_RESULT: ${{ needs.plan.result }}
           RUN_WINDOWS: ${{ needs.plan.outputs.run_windows }}
           WINDOWS_RESULT: ${{ needs.windows.result }}
@@ -163,12 +295,14 @@ jobs:
         run: |
           set -euo pipefail
           ok=0
+          [[ "$RESOLVE_RESULT" == "success" ]] || ok=1
           [[ "$PLAN_RESULT" == "success" ]] || ok=1
           [[ "$RUN_WINDOWS" != "true" || "$WINDOWS_RESULT" == "success" ]] || ok=1
           if [[ "$ok" != "0" ]]; then
             echo "[FAIL] CI Gate: WHY: a requested validation unit did not succeed"
-            echo "  (plan=${PLAN_RESULT}, windows=${WINDOWS_RESULT}; rule: draft/ci-gate -"
-            echo "  the conclusion is the enforcement, a skipped unit is not a pass)"
+            echo "  (resolve=${RESOLVE_RESULT}, plan=${PLAN_RESULT},"
+            echo "   windows=${WINDOWS_RESULT}; rule: draft/ci-gate -"
+            echo "   the conclusion is the enforcement, a skipped unit is not a pass)"
             echo "  NEXT action: DIAGNOSE - open the failed unit's step logs above,"
             echo "  classify the failure, fix it at the validated revisions, then"
             echo "  re-dispatch jobs=${SELECTED}; a re-dispatch without a fix is not"
