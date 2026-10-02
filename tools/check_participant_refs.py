@@ -78,7 +78,20 @@ def scan(repo: Path, strict: bool) -> int:
         print(f)
     print(f"{len(findings)} findings ({len(findings) - len(hard)} exempt, {len(hard)} hard)")
     if strict and hard:
+        # B7b (four-element law, ADR-0060 D3): the strict-mode FAIL teaches
+        # its rule and the mechanical route; report mode (default) stays
+        # exit-zero with findings visible and says so below.
+        print("[FAIL] participant-refs: WHY: a normative surface names a concrete "
+              "participant instance (rule: draft/participant-refs, DR-019/I-PM: "
+              "rules prescribe behavior in participant-model vocabulary, they do "
+              "not bind to tools/models/devices)")
+        print("       NEXT action: FIX - rephrase the flagged line in class/role "
+              "vocabulary, or add a reviewed EXEMPTIONS entry carrying its law "
+              "reason; never widen INSTANCE_TOKENS to pass")
         return 1
+    if hard:
+        print(f"[NOTE] report mode: {len(hard)} hard finding(s) listed above; "
+              "re-run with --strict to fail on them")
     return 0
 
 
