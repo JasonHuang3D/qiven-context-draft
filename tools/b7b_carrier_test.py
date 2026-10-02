@@ -11,7 +11,8 @@ Regression coverage for this repository's four-element carriers:
   B7b-D3  SG-6 closure: .github/workflows/ci.yml exists and matches the
           accepted ci.full profile shape the operator.json declaration
           names (workflow_dispatch jobs input, typed plan admission with
-          WHY/NEXT, workspace-pinned node checkouts, ci-gate conclusion
+          WHY/NEXT, lock-resolved node checkouts (2026-10-03 pin
+          cancellation; no node pins live in the workflow), ci-gate conclusion
           enforcement) - source pins
   B7b-D4  the operator.json ci.full registration resolves: the declared
           workflow file is present in-tree (no dangling registration)
@@ -114,7 +115,7 @@ def case_d3() -> None:
     check("NEXT action: FIX - correct the unit name" in text, "B7b-D3",
           "plan FAIL carries the FIX route")
     check("JasonHuang3D/qiven-workspace" in text, "B7b-D3",
-          "workspace control checkout pinned")
+          "workspace control checkout present")
     check("JasonHuang3D/qiven-context-draft" in text, "B7b-D3",
           "candidate checkout present")
     check("gate-configure" in text, "B7b-D3", "workspace-path configure")
